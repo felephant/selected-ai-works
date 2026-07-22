@@ -879,21 +879,37 @@ function ensureAudio(){
     }
   }catch(e){ /* 无音频环境则静默 */ }
 }
-function playTick(speed){
+/* 音符按转轮方向在音阶上走：向一边转依次升，向另一边依次降，走到头折返。
+   比纯随机顺耳得多——相邻两下永远是相邻音级，不会出现突兀的大跳。 */
+let noteIdx = 0;
+function playTick(speed, dir){
   if(!actx || actx.state!=='running' || !scaleBuffers) return;
+  const N = scaleBuffers.length;
+  if(dir){                       // 有方向就走音阶，到头回绕成连续的上行/下行琶音
+    noteIdx = ((noteIdx + (dir > 0 ? 1 : -1)) % N + N) % N;
+  } else {
+    noteIdx = Math.floor(Math.random()*N);
+  }
   const t=actx.currentTime;
   const src=actx.createBufferSource(), g=actx.createGain();
-  src.buffer = scaleBuffers[Math.floor(Math.random()*scaleBuffers.length)];
-  const v=Math.min(0.5, 0.2 + Math.abs(speed)/3200);   // 转得越快敲得越响一点
+  src.buffer = scaleBuffers[noteIdx];
+  /* 素材本身是 50ms 达峰、约 1.1s 自然衰减的音板音色。
+     之前在 160ms 处强行掐断（那时还有约 20% 响度），听感发闷；
+     现在让它自然延展，只在尾部做一次温和收束，快速连敲时余音自然叠成琶音。 */
+  const v=Math.min(0.34, 0.14 + Math.abs(speed)/6000);
   g.gain.setValueAtTime(v,t);
-  g.gain.exponentialRampToValueAtTime(0.001,t+0.16);   // 原始音符有1秒多的尾巴，截短成轻快的一敲
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.9);
   src.connect(g); g.connect(actx.destination);
-  src.start(t); src.stop(t+0.2);
+  src.start(t); src.stop(t+0.95);
 }
 let lastNotch=0;
 function notchCheck(){
   const n=Math.round(offset/SPACING);
-  if(n!==lastNotch){ lastNotch=n; playTick(spinVel || (targetOffset-offset)*EASE); }
+  if(n!==lastNotch){
+    const dir = n - lastNotch;          // 过卡方向 → 音阶升/降
+    lastNotch = n;
+    playTick(spinVel || (targetOffset-offset)*EASE, dir);
+  }
 }
 
 /* ---- 惯性：松手后按角速度滑行，摩擦衰减，慢到阈值再吸附卡位 ---- */
