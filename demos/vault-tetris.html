@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VAULT — Personal Knowledge Management</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { background: #fafafa; cursor: none; font-family: 'DM Sans', sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #label-top {
+      position: fixed; top: 28px; left: 50%; transform: translateX(-50%);
+      z-index: 3; font-size: 11px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(0,0,0,0.15);
+      pointer-events: none; white-space: nowrap;
+    }
+    #ui {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 18px; z-index: 3; pointer-events: none;
+    }
+    .lbl { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(0,0,0,0.18); }
+    #btnClear {
+      pointer-events: auto; cursor: none; font: inherit;
+      font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 7px 18px; border-radius: 999px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.8);
+      color: rgba(0,0,0,0.3);
+      transition: border-color 180ms, color 180ms, background 180ms;
+    }
+    #btnClear:hover { border-color: rgba(0,0,0,0.25); color: rgba(0,0,0,0.55); background: #fff; }
+    html.embedded, body.embedded { background: transparent; }
+    body.embedded #label-top, body.embedded #ui { display: none; }
+  </style>
+</head>
+<body>
+  <script>
+    const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
+    if (isEmbedded) {
+      document.documentElement.classList.add('embedded');
+      document.body.classList.add('embedded');
+    }
+  </script>
+  <div id="label-top">Personal Knowledge Management — VAULT</div>
+  <div id="ui">
+    <span class="lbl">Click to drop a block</span>
+    <button id="btnClear">↺ Clear</button>
+  </div>
+  <canvas id="scene"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/examples/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/"
+  }}
+  </script>
+  <script type="module">
+  import * as THREE from 'three';
+  import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+  const CANNON = window.CANNON;
+
+  // ─── RENDERER ────────────────────────────────────────────────────
+  const canvas = document.getElementById('scene');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfafafa);
+
+  // ─── CAMERA ──────────────────────────────────────────────────────
+  // Low angle, slightly elevated — matches Layout Example reference
+  const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 3.5, 17);
+  camera.lookAt(0.5, -1.2, 0);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ─── LIGHTING ────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+
+  const key = new THREE.DirectionalLight(0xffffff, 1.8);
+  key.position.set(0, 14, 8);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.camera.left = -18; key.shadow.camera.right  = 18;
+  key.shadow.camera.top  = 14;  key.shadow.camera.bottom = -14;
+  key.shadow.camera.far  = 40;  key.shadow.bias = -0.0005;
+  scene.add(key);
+
+  // Pink fill lights — color the white letters and scatter glow on the floor
+  const pinkA = new THREE.PointLight(0xff5aa0, 14, 22, 2);
+  pinkA.position.set(0, 0.2, 4.5);
+  scene.add(pinkA);
+
+  const pinkB = new THREE.PointLight(0xff7ab8, 9, 18, 2);
+  pinkB.position.set(-5, -0.8, 3);
+  scene.add(pinkB);
+
+  const violet = new THREE.PointLight(0xd46fff, 6, 16, 2);
+  violet.position.set(5.5, -0.5, 2.5);
+  scene.add(violet);
+
+  // ─── FLOOR ───────────────────────────────────────────────────────
+  const FLOOR_Y = -3.85;
+
+  const floorMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.ShadowMaterial({ color: 0xff5aa0, opacity: 0.08 })
+  );
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = FLOOR_Y;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  // ─── FLOOR GLOW SPRITES ──────────────────────────────────────────
+  // Simulates the colored glow the reference achieves via Spline SSR
+  function makeGlowSprite(hex, size, alpha, px, pz, sx = 1, sz = 1) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    const col = new THREE.Color(hex);
+    const r = Math.round(col.r * 255), g = Math.round(col.g * 255), b = Math.round(col.b * 255);
+    const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    grad.addColorStop(0,    `rgba(${r},${g},${b},${alpha})`);
+    grad.addColorStop(0.45, `rgba(${r},${g},${b},${alpha * 0.35})`);
+    grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(px, FLOOR_Y + 0.02, pz);
+    mesh.scale.set(sx, sz, 1);
+    scene.add(mesh);
+  }
+
+  makeGlowSprite(0xff6aaa, 14, 0.72, -0.5, 0.8, 2.2, 0.8);   // large central pink
+  makeGlowSprite(0xff3d85, 10, 0.55, -4.5, 1.0, 1.8, 0.65);   // left hot pink (V)
+  makeGlowSprite(0xd460ff, 8,  0.35,  5.0, 0.6, 1.6, 0.65);   // right purple (T)
+
+  // ─── VAULT LETTER MATERIAL — Fresnel ShaderMaterial ──────────────
+  // white center → baby pink body → hot pink edges (matches reference)
+  const vaultVS = `
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    void main() {
+      vNormal   = normalize(normalMatrix * normal);
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const vaultFS = `
+    uniform vec3 uTop;   // pure white
+    uniform vec3 uMid;   // soft pink
+    uniform vec3 uEdge;  // hot pink
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    void main() {
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      float fr = pow(1.0 - max(0.0, dot(vNormal, viewDir)), 1.5);
+      float up = max(0.0, dot(vNormal, vec3(0.0, 1.0, 0.0)));
+      // Core gradient: white → mid pink → hot pink on grazing edges
+      vec3 col = mix(uTop, uMid, fr * 0.75);
+      col = mix(col, uEdge, pow(fr, 2.0) * 0.88);
+      // Top faces stay bright white
+      col = mix(col, uTop, up * 0.55 * (1.0 - fr * 0.6));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `;
+
+  const wordMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTop:  { value: new THREE.Color(0xffffff) },
+      uMid:  { value: new THREE.Color(0xffb8d0) },
+      uEdge: { value: new THREE.Color(0xff3d85) },
+    },
+    vertexShader:   vaultVS,
+    fragmentShader: vaultFS,
+  });
+
+  // ─── WORD GROUP ───────────────────────────────────────────────────
+  const wordGroup = new THREE.Group();
+  // Slight diagonal tilt to match Layout Example reference
+  wordGroup.rotation.z = -0.06;
+  wordGroup.position.set(0, 0.1, 0.2);
+  scene.add(wordGroup);
+
+  // ─── LETTER STROKES (V A U L T) ──────────────────────────────────
+  // Each letter = capsule segments + sphere joints
+  // Coordinates are in world-Y-up (y=0 is roughly center, negative = down)
+  const strokes = [
+    // V
+    [-6.1, -1.5,  -5.2, -3.1, 0.72],
+    [-5.2, -3.1,  -4.1, -1.0, 0.72],
+    // A
+    [-3.2, -3.1,  -2.2, -0.9, 0.76],
+    [-1.2, -3.0,  -2.2, -0.9, 0.76],
+    [-2.75,-2.05, -1.65,-2.05, 0.68],
+    // U
+    [-0.05,-1.0,  -0.05,-2.7,  0.76],
+    [-0.05,-2.7,   1.35,-2.8,  0.76],
+    [ 1.35,-2.8,   1.4, -1.2,  0.76],
+    // L
+    [ 2.5, -1.1,   2.5, -3.0,  0.76],
+    [ 2.5, -3.0,   4.2, -3.0,  0.76],
+    // T
+    [ 4.85,-1.1,   6.65,-1.1,  0.76],
+    [ 5.75,-1.1,   5.75,-3.15, 0.70],
+  ];
+
+  function addStroke(ax, ay, bx, by, r) {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    // visual capsule
+    const geo = new THREE.CapsuleGeometry(r, Math.max(0.01, len - r * 2), 10, 20);
+    const mesh = new THREE.Mesh(geo, wordMat);
+    mesh.position.set(mx, my, 0);
+    mesh.rotation.z = angle;
+    wordGroup.add(mesh);
+  }
+
+  function addJoint(x, y, r) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r * 0.97, 24, 24), wordMat);
+    mesh.position.set(x, y, 0);
+    mesh.scale.z = 0.92;
+    wordGroup.add(mesh);
+  }
+
+  // Build visuals
+  const jointSet = new Map();
+  strokes.forEach(([ax, ay, bx, by, r]) => {
+    addStroke(ax, ay, bx, by, r);
+    const k1 = `${ax.toFixed(2)},${ay.toFixed(2)}`;
+    const k2 = `${bx.toFixed(2)},${by.toFixed(2)}`;
+    if (!jointSet.has(k1)) { jointSet.set(k1, r); addJoint(ax, ay, r); }
+    if (!jointSet.has(k2)) { jointSet.set(k2, r); addJoint(bx, by, r); }
+  });
+
+  // ─── PHYSICS ─────────────────────────────────────────────────────
+  const world = new CANNON.World();
+  world.gravity.set(0, -7.5, 0);
+  world.broadphase = new CANNON.NaiveBroadphase();
+  world.solver.iterations = 22;
+
+  const mFloor = new CANNON.Material('floor');
+  const mPiece = new CANNON.Material('piece');
+  const mWord  = new CANNON.Material('word');
+
+  world.addContactMaterial(new CANNON.ContactMaterial(mPiece, mFloor, { friction: 0.38, restitution: 0.42 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(mPiece, mWord,  { friction: 0.25, restitution: 0.52 }));
+
+  // Floor collider
+  const floorBody = new CANNON.Body({ mass: 0, material: mFloor });
+  floorBody.addShape(new CANNON.Plane());
+  floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI / 2);
+  floorBody.position.set(0, FLOOR_Y, 0);
+  world.addBody(floorBody);
+
+  // Word colliders (box per stroke, aligned with segment direction)
+  const wordRotOffset = new CANNON.Quaternion();
+  wordRotOffset.setFromAxisAngle(new CANNON.Vec3(0,0,1), wordGroup.rotation.z);
+
+  strokes.forEach(([ax, ay, bx, by, r]) => {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const body = new CANNON.Body({ mass: 0, material: mWord });
+    body.addShape(new CANNON.Box(new CANNON.Vec3(len / 2, r * 0.82, 1.0)));
+    // Apply wordGroup rotation + position offset
+    const q = new CANNON.Quaternion();
+    q.setFromAxisAngle(new CANNON.Vec3(0,0,1), angle + wordGroup.rotation.z);
+    body.quaternion.copy(q);
+    // Transform position by wordGroup rotation
+    const px = mx * Math.cos(wordGroup.rotation.z) - my * Math.sin(wordGroup.rotation.z) + wordGroup.position.x;
+    const py = mx * Math.sin(wordGroup.rotation.z) + my * Math.cos(wordGroup.rotation.z) + wordGroup.position.y;
+    body.position.set(px, py, wordGroup.position.z);
+    world.addBody(body);
+  });
+
+  // Sphere colliders for joints
+  jointSet.forEach((r, key) => {
+    const [xs, ys] = key.split(',').map(Number);
+    const body = new CANNON.Body({ mass: 0, material: mWord });
+    body.addShape(new CANNON.Sphere(r * 0.88));
+    const px = xs * Math.cos(wordGroup.rotation.z) - ys * Math.sin(wordGroup.rotation.z) + wordGroup.position.x;
+    const py = xs * Math.sin(wordGroup.rotation.z) + ys * Math.cos(wordGroup.rotation.z) + wordGroup.position.y;
+    body.position.set(px, py, wordGroup.position.z);
+    world.addBody(body);
+  });
+
+  // ─── TETROMINO PIECES ─────────────────────────────────────────────
+  const PIECES = {
+    I: [[0,0],[0,1],[0,2],[0,3]],
+    O: [[0,0],[0,1],[1,0],[1,1]],
+    T: [[0,0],[0,1],[0,2],[1,1]],
+    S: [[0,1],[0,2],[1,0],[1,1]],
+    Z: [[0,0],[0,1],[1,1],[1,2]],
+    L: [[0,0],[1,0],[2,0],[2,1]],
+    J: [[0,1],[1,1],[2,1],[2,0]],
+  };
+  const PIECE_KEYS = Object.keys(PIECES);
+  const PALETTE = [
+    [0xffbed7, 0xff4d8f],
+    [0xf5ccff, 0xdf80ff],
+    [0xffd6e4, 0xff6aaa],
+    [0xecd4ff, 0xc070ff],
+  ];
+
+  // Piece Fresnel shader (same concept, neon tones)
+  const pieceFS = `
+    uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uEdge; uniform float uA;
+    varying vec3 vNormal; varying vec3 vWorldPos;
+    void main() {
+      vec3 vd = normalize(cameraPosition - vWorldPos);
+      float fr = pow(1.0 - max(0.0, dot(vNormal, vd)), 1.4);
+      vec3 col = mix(uTop, uMid, fr * 0.7);
+      col = mix(col, uEdge, pow(fr, 1.8) * 0.9);
+      gl_FragColor = vec4(col, uA);
+    }
+  `;
+
+  function makePieceMat(mid, edge, alpha = 1.0) {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTop:  { value: new THREE.Color(0xffffff) },
+        uMid:  { value: new THREE.Color(mid) },
+        uEdge: { value: new THREE.Color(edge) },
+        uA:    { value: alpha },
+      },
+      vertexShader: vaultVS,
+      fragmentShader: pieceFS,
+      transparent: alpha < 1,
+    });
+  }
+
+  const UNIT  = 0.38;
+  const HALF  = UNIT * 0.46;
+  const DROP_Y = 5.2;
+  const pieceGeo = new RoundedBoxGeometry(0.33, 0.33, 0.33, 3, 0.07);
+
+  let curKey    = null;
+  let curColors = null;
+  const cursorGroup  = new THREE.Group();
+  const droppedMeshes = [];
+  const droppedBodies = [];
+  scene.add(cursorGroup);
+
+  const pointer     = new THREE.Vector2();
+  const pointerWorld = new THREE.Vector3();
+  const raycaster   = new THREE.Raycaster();
+  const dropPlane   = new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.2);
+
+  function pickNext() {
+    curKey    = PIECE_KEYS[Math.floor(Math.random() * PIECE_KEYS.length)];
+    curColors = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+  }
+
+  function centerOff(cells) {
+    const rs = cells.map(([r]) => r), cs = cells.map(([,c]) => c);
+    return {
+      x: -((Math.min(...cs) + Math.max(...cs)) / 2) * UNIT,
+      y:  ((Math.min(...rs) + Math.max(...rs)) / 2) * UNIT,
+    };
+  }
+
+  function rebuildCursor() {
+    while (cursorGroup.children.length) {
+      const c = cursorGroup.children[0];
+      cursorGroup.remove(c);
+      c.material.dispose();
+    }
+    PIECES[curKey].forEach(([row, col]) => {
+      const m = new THREE.Mesh(pieceGeo, makePieceMat(curColors[0], curColors[1], 0.55));
+      m.position.set(col * UNIT, -row * UNIT, 0);
+      cursorGroup.add(m);
+    });
+  }
+
+  function dropPiece() {
+    const cells = PIECES[curKey];
+    const off   = centerOff(cells);
+    const group = new THREE.Group();
+    scene.add(group);
+    droppedMeshes.push(group);
+
+    cells.forEach(([row, col]) => {
+      const m = new THREE.Mesh(pieceGeo, makePieceMat(curColors[0], curColors[1], 1));
+      m.castShadow = true;
+      m.position.set(col * UNIT, -row * UNIT, 0);
+      group.add(m);
+    });
+
+    const body = new CANNON.Body({ mass: 0.55, material: mPiece });
+    body.allowSleep = false;
+    body.linearDamping  = 0.04;
+    body.angularDamping = 0.25;
+    cells.forEach(([row, col]) => {
+      body.addShape(
+        new CANNON.Box(new CANNON.Vec3(HALF, HALF, HALF)),
+        new CANNON.Vec3(col * UNIT + off.x, -row * UNIT + off.y, 0)
+      );
+    });
+    body.position.set(pointerWorld.x, DROP_Y, pointerWorld.z);
+    world.addBody(body);
+    droppedBodies.push(body);
+
+    pickNext();
+    rebuildCursor();
+  }
+
+  // ─── EVENTS ───────────────────────────────────────────────────────
+  document.getElementById('btnClear').addEventListener('click', () => {
+    droppedMeshes.splice(0).forEach(g => {
+      g.traverse(c => { if (c.isMesh) c.material.dispose(); });
+      scene.remove(g);
+    });
+    droppedBodies.splice(0).forEach(b => world.remove(b));
+  });
+
+  window.addEventListener('mousemove', e => {
+    pointer.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  });
+
+  window.addEventListener('click', e => {
+    if (e.target.closest('#btnClear')) return;
+    dropPiece();
+  });
+
+  pickNext();
+  rebuildCursor();
+
+  // ─── ANIMATE ──────────────────────────────────────────────────────
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.05);
+
+    world.step(1 / 60, dt, 4);
+
+    // Cursor follows mouse at drop height
+    raycaster.setFromCamera(pointer, camera);
+    raycaster.ray.intersectPlane(dropPlane, pointerWorld);
+    pointerWorld.x = THREE.MathUtils.clamp(pointerWorld.x, -8, 8);
+    pointerWorld.z = THREE.MathUtils.clamp(pointerWorld.z, -0.5, 1.8);
+    pointerWorld.y = DROP_Y;
+
+    cursorGroup.position.copy(pointerWorld);
+    cursorGroup.rotation.y += 0.013;
+    cursorGroup.rotation.x  =  0.22;
+    cursorGroup.rotation.z  =  0.10;
+
+    droppedMeshes.forEach((g, i) => {
+      g.position.copy(droppedBodies[i].position);
+      g.quaternion.copy(droppedBodies[i].quaternion);
+    });
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+  </script>
+</body>
+</html>

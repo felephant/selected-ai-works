@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zoe Sun · Selected AI Works</title>
+<style>
+  :root{
+    --paper:#fdfcf8;
+    --ink:#2b251d;
+    --ink-soft:#6b5f4d;
+    --sepia:#8a7350;
+    --gold:#b3925e;
+    --faint:#d8c9a8;
+    --card-paper:#fffef9;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:Georgia,"Times New Roman",serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* stage carries the paper colour itself: it is a stacking context, so the
+     multiply-blended backdrop must be painted inside it, not on body */
+  #stage{position:fixed;inset:0;overflow:hidden;background:var(--paper)}
+  #wheelSvg,#dust{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  /* generated ornate astrolabe: white PNG multiply-blended into the paper, geared to the wheel.
+     Mask lives on the wrapper (fades out toward the masthead) so it doesn't spin with the art. */
+
+  /* ---- 排版骨架：名字上中（太阳纹章下），左上个人小字 ----
+     （日后 Codex/生成图把太阳换成立体铜像，这里先占位） */
+  .masthead{
+    position:fixed;top:74px;left:0;right:0;text-align:center;z-index:30;pointer-events:none;
+  }
+  .masthead h1{
+    font-size:30px;font-weight:400;letter-spacing:.34em;text-indent:.34em;
+  }
+  .masthead .sub{
+    margin-top:8px;font-size:10px;letter-spacing:.44em;text-indent:.44em;
+    text-transform:uppercase;color:var(--sepia);
+  }
+  .aside-note{
+    position:fixed;top:38px;left:44px;z-index:30;pointer-events:none;
+    font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+    color:var(--ink-soft);line-height:2.1;opacity:.85;
+  }
+
+  /* ---- 手势控制开关 + 摄像头预览 ---- */
+  .hand-toggle{
+    position:fixed;top:38px;right:44px;z-index:40;
+    font-family:inherit;font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+    color:var(--ink-soft);background:none;border:1px solid var(--faint);
+    padding:10px 16px;cursor:pointer;
+    transition:border-color .25s,color .25s;
+  }
+  .hand-toggle:hover{border-color:var(--gold);color:var(--ink)}
+  .hand-toggle.on{border-color:var(--gold);color:var(--ink)}
+  .hand-toggle.err{border-color:#c08a8a;color:#a06060;cursor:default}
+
+  .cam-wrap{
+    position:fixed;right:44px;bottom:96px;z-index:40;
+    width:150px;display:none;flex-direction:column;gap:6px;
+    align-items:center;
+  }
+  .cam-wrap.on{display:flex}
+  /* 摄像头画面不展示：视频只在后台喂给手部识别，指尖星星做可视反馈 */
+  .cam-wrap video{
+    position:fixed;left:0;bottom:0;width:2px;height:2px;
+    opacity:0;pointer-events:none;
+  }
+  #stars{
+    position:fixed;inset:0;width:100%;height:100%;
+    pointer-events:none;z-index:60;
+  }
+  .cam-status{
+    font-size:9px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ink-soft);text-align:center;line-height:1.8;
+  }
+
+  /* ---- 转轮切换按钮 ----
+     按钮各自绝对定位、固定在中线两侧的定距上；中间计数器也独立居中。
+     三者互不参与同一个 flex 布局，计数器文字（标题）再长也不会推移按钮位置——
+     之前用 flex+gap 时，Personal Knowledge Management 这种长标题会撑宽 .counter，
+     连带把两侧按钮挤开，导致每张卡的按钮位置对不齐。 */
+  .nav{
+    position:fixed;bottom:34px;left:0;right:0;height:38px;z-index:30;
+  }
+  .nav button{
+    position:absolute;top:0;
+    width:38px;height:38px;border-radius:50%;
+    border:1px solid var(--faint);background:transparent;color:var(--sepia);
+    font-family:inherit;font-size:16px;line-height:1;cursor:pointer;
+    transition:border-color .25s,color .25s,transform .15s;
+  }
+  #prevBtn{left:50%;margin-left:-151px}
+  #nextBtn{left:50%;margin-left:113px}
+  .nav button:hover{border-color:var(--gold);color:var(--ink)}
+  .nav button:active{transform:scale(.92)}
+  .nav .counter{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:max-content;max-width:46vw;text-align:center;
+    color:var(--ink-soft);
+    display:flex;flex-direction:column;align-items:center;gap:5px;
+  }
+  .counter-title{
+    font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);
+  }
+  .counter-page{
+    font-size:10px;letter-spacing:.3em;text-indent:.3em;color:var(--sepia);
+  }
+
+  /* ---- 卡片 ---- */
+  .card{
+    position:absolute;top:0;left:0;
+    will-change:transform,opacity;
+    cursor:pointer;
+  }
+  .card-inner{
+    width:100%;height:100%;
+    background:var(--card-paper);
+    border:1px solid var(--gold);
+    box-shadow:
+      0 1px 0 rgba(179,146,94,.25) inset,
+      0 18px 40px -18px rgba(94,74,44,.35);
+    padding:7%;
+    display:flex;flex-direction:column;
+    transition:box-shadow .35s ease;
+    position:relative;
+  }
+  .has-cover .card-inner{
+    background:transparent;
+    border-color:transparent;
+    box-shadow:none;
+    padding:0;
+    overflow:visible;
+  }
+  .card:hover .card-inner{
+    box-shadow:
+      0 1px 0 rgba(179,146,94,.25) inset,
+      0 30px 60px -20px rgba(94,74,44,.5);
+  }
+  .has-cover:hover .card-inner{
+    box-shadow:none;
+  }
+  .card-cover{
+    position:absolute;
+    left:50%;top:var(--cover-top, 46%);
+    height:var(--cover-height, 124%);width:auto;max-width:none;
+    transform:translate(-50%,-50%) scaleX(var(--cover-scale-x, 1));
+    pointer-events:none;
+    user-select:none;
+  }
+  /* 淡色版叠在显色版之上，opacity 由 layout() 逐帧驱动（居中=0 隐藏显色版透出，转出去=1 盖住） */
+  .cover-edge{ opacity:0; will-change:opacity; }
+  .has-cover .card-frame{display:none}
+  .has-cover .card-inner::before,
+  .has-cover .card-inner::after{display:none}
+  .has-cover .card-art{
+    position:absolute;inset:0;margin:0;
+  }
+  .has-cover .card-title,
+  .has-cover .card-sub{display:none}
+  .card-frame{
+    position:absolute;inset:4.5%;
+    border:1px solid var(--faint);
+    pointer-events:none;
+  }
+  .card-frame::before,.card-frame::after,
+  .card-inner::before,.card-inner::after{
+    content:"";position:absolute;width:14px;height:14px;
+    border-color:var(--gold);border-style:solid;opacity:.9;
+  }
+  .card-frame::before{top:-1px;left:-1px;border-width:1px 0 0 1px}
+  .card-frame::after{top:-1px;right:-1px;border-width:1px 1px 0 0}
+  .card-inner::before{bottom:4.5%;left:4.5%;margin:-1px;width:14px;height:14px;border-width:0 0 1px 1px;border-color:var(--gold);border-style:solid}
+  .card-inner::after{bottom:4.5%;right:4.5%;margin:-1px;border-width:0 1px 1px 0;border-color:var(--gold);border-style:solid}
+
+  .card-art{
+    flex:1;margin:8% 6% 6%;
+    display:flex;align-items:center;justify-content:center;
+    position:relative;
+  }
+  .card-art svg{width:82%;height:82%;overflow:visible}
+  .card-art svg *{
+    fill:none;stroke:var(--sepia);stroke-width:1.1;
+    vector-effect:non-scaling-stroke;
+  }
+  .card-art img{display:block}
+  .card-title{
+    text-align:center;font-size:15px;letter-spacing:.08em;line-height:1.4;
+  }
+  .card-sub{
+    text-align:center;font-size:10px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ink-soft);margin-top:5px;padding-bottom:5%;
+  }
+
+  /* ---- 详情页：Dior J'adore 式 hero + 可下滑 one-pager ----
+          巨幅衬线标题横贯整页，卡片悬浮盖在标题上；
+          往下滑进入克制的 Idea 2 图文编辑排版 ---- */
+  #detail{
+    position:fixed;inset:0;z-index:50;background:var(--paper);
+    opacity:0;visibility:hidden;
+    overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+    transition:opacity .4s ease, visibility 0s linear .4s;
+  }
+  #detail.open{
+    opacity:1;visibility:visible;
+    transition:opacity .4s ease;
+  }
+  .d2-hero{position:relative;min-height:100vh}
+
+  /* 巨幅标题：单行贴满视口宽（不过度出血裁字） */
+  .d2-head{
+    position:absolute;top:15vh;left:50%;transform:translateX(-50%);
+    white-space:nowrap;z-index:1;
+    font-family:Georgia,"Times New Roman",serif;
+    font-weight:400;text-transform:uppercase;
+    letter-spacing:.02em;line-height:1;
+    color:var(--ink);pointer-events:none;user-select:none;
+    opacity:0;transition:opacity .6s ease .1s;
+  }
+  #detail.open .d2-head{opacity:1}
+
+  /* 悬浮卡：盖在标题之上，缓慢飘浮 */
+  .d2-card{
+    position:absolute;left:50%;top:38vh;z-index:2;
+    height:min(46vh, 440px);aspect-ratio:1/1.66;
+    transform:translate(-50%,-50%);
+    filter:drop-shadow(0 30px 40px rgba(94,74,44,.28));
+    opacity:0;transition:opacity .6s ease .18s;
+    pointer-events:none;   /* 悬浮卡是装饰：鼠标穿透给铺满 hero 的 demo */
+  }
+  #detail.open .d2-card{opacity:1}
+  .d2-card .card-inner{cursor:default}
+  .d2-card.has-cover .card-title{font-size:14px}
+  /* live demo 透明底铺满整个 hero 首屏：大标题与悬浮卡透出，demo 物件与它们同台 */
+  .d2-game{
+    position:absolute;inset:0;z-index:2;
+    background:transparent;border:none;overflow:hidden;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .6s ease .18s, visibility 0s linear .78s;
+  }
+  .d2-game iframe{
+    display:block;width:100%;height:100%;border:0;
+    background:transparent;
+  }
+  .d2-hero.has-game .d2-game{
+    opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity .6s ease .18s;
+  }
+  /* demo 物件的层级（用户拍板）：词块浮在文字之上，但永远压不住卡片；
+     body 退出 stacking context，让 demo 按钮单独浮到最上层保持可点 */
+  .d2-hero.has-game .d2-game{z-index:4}
+  .d2-hero.has-game .d2-card{z-index:5}
+  .d2-hero.has-game .d2-body{z-index:auto}
+  .d2-hero.has-game .d2-body .d-demo{position:relative;z-index:6}
+  .d2-float{width:100%;height:100%;animation:d2sway 7s ease-in-out infinite}
+  @keyframes d2sway{
+    0%,100%{transform:translateY(0) rotate(-1.4deg)}
+    50%    {transform:translateY(-14px) rotate(1.4deg)}
+  }
+
+  /* hero 下方居中正文 */
+  .d2-body{
+    position:absolute;left:50%;top:63vh;transform:translate(-50%,18px);
+    width:min(64ch, 84vw);text-align:center;z-index:3;
+    opacity:0;
+    transition:transform .55s cubic-bezier(.22,.8,.3,1) .26s, opacity .55s ease .26s;
+  }
+  #detail.open .d2-body{transform:translate(-50%,0);opacity:1}
+  .d2-scrollcue{
+    position:absolute;bottom:3.5vh;left:50%;transform:translateX(-50%);
+    font-size:9px;letter-spacing:.4em;text-indent:.4em;text-transform:uppercase;
+    color:var(--sepia);opacity:.7;pointer-events:none;
+    animation:cueFloat 2.6s ease-in-out infinite;
+  }
+  @keyframes cueFloat{0%,100%{transform:translate(-50%,0)}50%{transform:translate(-50%,6px)}}
+
+  /* ---- one-pager 章节：克制的 Idea 2 图文（Natoora 硬影图 + Rams 规格条） ---- */
+  .d2-sections{
+    max-width:1040px;margin:0 auto;
+    padding:8vh 6vw 6vh;
+    display:flex;flex-direction:column;gap:11vh;
+  }
+  .d2-row{
+    display:grid;grid-template-columns:1fr 1fr;gap:6vw;align-items:center;
+  }
+  .d2-row.flip .d2-fig{order:2}
+  .d2-fig{position:relative;display:flex;justify-content:center}
+  .d2-fig img,.d2-fig svg{
+    width:min(78%, 340px);height:auto;display:block;
+    box-shadow:26px 30px 0 rgba(43,37,29,.07);   /* Natoora 式硬阴影 */
+  }
+  .d2-fig svg{aspect-ratio:1;padding:34px;border:1px solid var(--faint);background:var(--card-paper)}
+  .d2-fig svg *{fill:none;stroke:var(--sepia);stroke-width:1.2;vector-effect:non-scaling-stroke}
+  .d2-figcap{
+    position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);
+    font-size:9px;letter-spacing:.32em;text-indent:.32em;text-transform:uppercase;
+    color:var(--ink-soft);white-space:nowrap;
+  }
+  /* 深度内容（事实块/故事/编年章节）还没定稿时，整段换成这一条通知，规格条照旧显示 */
+  .d2-wip{
+    display:none;text-align:center;padding:4vh 0 2vh;
+    border-top:1px solid var(--faint);
+  }
+  .d2-wip h3{margin-bottom:14px}
+  .d2-wip p{font-size:14.5px;color:var(--ink-soft);letter-spacing:.02em}
+  .d2-sections.is-wip .d2-wip{display:block}
+  .d2-sections.is-wip .d2-facts,
+  .d2-sections.is-wip .d2-row,
+  .d2-sections.is-wip .d2-chapters{display:none}
+  .d2-sections h3{
+    font-size:10px;font-weight:400;letter-spacing:.4em;text-transform:uppercase;
+    color:var(--sepia);margin-bottom:22px;
+  }
+  .d2-copy p{
+    font-size:14.5px;line-height:2.1;color:var(--ink);
+    max-width:44ch;margin-bottom:14px;
+  }
+  /* In plain terms：四问硬事实块 */
+  .d2-fact{
+    display:grid;grid-template-columns:190px 1fr;gap:30px;
+    padding:16px 0;border-top:1px solid var(--faint);
+  }
+  .d2-fact dt{
+    font-size:9px;letter-spacing:.32em;text-transform:uppercase;
+    color:var(--sepia);padding-top:5px;
+  }
+  .d2-fact dd{
+    font-size:14.5px;line-height:1.9;color:var(--ink);max-width:60ch;
+  }
+  /* 编年章节：文字 + 侧挂 placeholder（日后换真实图像/证据），左右交替 */
+  .d2-chapters{display:flex;flex-direction:column;gap:9vh}
+  .d2-chap{
+    display:grid;grid-template-columns:1.2fr .8fr;gap:5vw;align-items:start;
+    border-top:1px solid var(--faint);padding-top:36px;
+  }
+  .d2-chap:nth-child(even){grid-template-columns:.8fr 1.2fr}
+  .d2-chap:nth-child(even) .d2-chap-text{order:2}
+  .d2-chap-tag{
+    font-size:9px;letter-spacing:.32em;text-transform:uppercase;
+    color:var(--sepia);margin-bottom:12px;
+  }
+  .d2-chap h4{
+    font-weight:400;font-size:19px;letter-spacing:.04em;
+    color:var(--ink);margin-bottom:14px;
+  }
+  .d2-chap p{
+    font-size:14px;line-height:2;color:var(--ink);
+    max-width:58ch;margin-bottom:12px;
+  }
+  .d2-ph{
+    border:1px dashed var(--faint);background:var(--card-paper);
+    aspect-ratio:4/3;
+    display:flex;flex-direction:column;gap:10px;
+    align-items:center;justify-content:center;text-align:center;
+    padding:18px;
+  }
+  .d2-ph em{
+    font-style:normal;font-size:9px;letter-spacing:.3em;text-transform:uppercase;
+    color:var(--faint);
+  }
+  .d2-ph span{
+    font-size:9px;letter-spacing:.26em;text-transform:uppercase;
+    color:var(--ink-soft);line-height:2;
+  }
+  /* Rams 规格条 */
+  .d2-specstrip{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:28px;
+    border-top:none;
+  }
+  .d2-spec{border-top:1px solid var(--ink);padding-top:9px}
+  .d2-spec span{
+    display:block;font-size:9px;letter-spacing:.32em;text-transform:uppercase;
+    color:var(--sepia);margin-bottom:6px;
+  }
+  .d2-spec b{font-weight:400;font-size:12.5px;letter-spacing:.05em;color:var(--ink)}
+  /* 尾部 */
+  .d2-foot{
+    text-align:center;padding:0 6vw 14vh;
+  }
+  .d2-foot .d-demo{margin-bottom:34px}
+  .d2-backline{
+    display:block;margin-top:10px;
+    font-size:10px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;
+    color:var(--sepia);background:none;border:none;cursor:pointer;font-family:inherit;
+    width:100%;padding:8px 0;
+  }
+  .d2-backline:hover{color:var(--ink)}
+  @media (max-width:860px){
+    .d2-row{grid-template-columns:1fr;gap:9vh}
+    .d2-row.flip .d2-fig{order:0}
+    .d2-specstrip{grid-template-columns:1fr 1fr;gap:22px}
+    .d2-fact{grid-template-columns:1fr;gap:8px}
+    .d2-chap,.d2-chap:nth-child(even){grid-template-columns:1fr;gap:26px}
+    .d2-chap:nth-child(even) .d2-chap-text{order:0}
+  }
+  .d2-blurb{
+    font-size:15px;line-height:2;color:var(--ink);
+    margin-bottom:18px;
+  }
+  /* 诚实的完成度标签：拆掉"六个同等完成度"的错觉 */
+  .d2-status{
+    display:inline-block;
+    font-size:9px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;
+    color:var(--sepia);border:1px solid var(--faint);
+    padding:7px 14px;margin-bottom:18px;
+  }
+  .d2-meta{
+    font-size:10px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;
+    color:var(--sepia);margin-bottom:26px;
+  }
+  .d2-demonote{
+    margin-top:14px;
+    font-size:10px;letter-spacing:.12em;color:var(--ink-soft);
+  }
+  .d-demo{
+    display:inline-block;
+    font-size:11px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;
+    color:var(--ink);text-decoration:none;
+    border:1px solid var(--faint);padding:13px 26px;
+    transition:border-color .25s;
+  }
+  .d-demo:hover{border-color:var(--gold)}
+  .d-demo.disabled{opacity:.4;pointer-events:none}
+
+  .d-close{
+    position:fixed;top:34px;left:44px;z-index:70;
+    font-size:11px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;
+    color:var(--sepia);background:var(--paper);border:none;
+    padding:10px 14px 10px 0;cursor:pointer;font-family:inherit;
+  }
+  .d-close:hover{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){ .d2-float{animation:none} }
+
+  @media (prefers-reduced-motion:reduce){ .card{transition:none} }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="dust"></canvas>
+  <svg id="wheelSvg"></svg>
+  <!-- cards injected by JS -->
+</div>
+
+<div class="aside-note">
+  Product and graphic designer<br>
+  working with AI as daily craft<br>
+  seven systems, drawn one at a time
+</div>
+
+<div class="masthead">
+  <h1>ZOE SUN</h1>
+  <div class="sub">Selected AI Works · MMXXVI</div>
+</div>
+
+<div class="nav">
+  <button id="prevBtn" aria-label="Turn wheel left">‹</button>
+  <div class="counter" id="counter">I / VII</div>
+  <button id="nextBtn" aria-label="Turn wheel right">›</button>
+</div>
+
+<button class="hand-toggle" id="handToggle">✋ Hand control</button>
+<div class="cam-wrap" id="camWrap">
+  <video id="camVideo" muted playsinline></video>
+  <div class="cam-status" id="camStatus">initializing…</div>
+</div>
+<canvas id="stars"></canvas>
+
+<div id="detail" role="dialog" aria-modal="true">
+  <div class="d2-hero">
+    <div class="d2-head" aria-hidden="true"></div>
+    <div class="d2-game">
+      <iframe id="d2-game-frame" title="Interactive project demo" loading="eager"></iframe>
+    </div>
+    <div class="d2-card">
+      <div class="d2-float">
+        <div class="card-inner">
+          <div class="card-frame"></div>
+          <div class="card-art"></div>
+          <div class="card-title"></div>
+          <div class="card-sub"></div>
+        </div>
+      </div>
+    </div>
+    <div class="d2-body">
+      <p class="d2-blurb"></p>
+      <div class="d2-status"></div>
+      <div class="d2-meta"></div>
+      <a class="d-demo" target="_blank" rel="noopener">Open live demo&nbsp;&nbsp;↗</a>
+      <div class="d2-demonote"></div>
+    </div>
+    <div class="d2-scrollcue">Scroll ↓</div>
+  </div>
+
+  <div class="d2-sections">
+    <div class="d2-wip">
+      <h3>Case study</h3>
+      <p>Case study working in progress.</p>
+    </div>
+
+    <div class="d2-facts">
+      <h3>In plain terms</h3>
+      <dl>
+        <div class="d2-fact"><dt>What I made</dt><dd class="f-made"></dd></div>
+        <div class="d2-fact"><dt>What you can do</dt><dd class="f-operate"></dd></div>
+        <div class="d2-fact"><dt>What it solves</dt><dd class="f-solves"></dd></div>
+        <div class="d2-fact"><dt>What comes out</dt><dd class="f-output"></dd></div>
+      </dl>
+    </div>
+
+    <div class="d2-row">
+      <div class="d2-fig">
+        <span class="d2-figart"></span>
+        <span class="d2-figcap">Fragment · study</span>
+      </div>
+      <div class="d2-copy">
+        <h3>Story</h3>
+        <p class="d2-concept"></p>
+        <p class="d2-concept2"></p>
+      </div>
+    </div>
+
+    <!-- 编年章节：按真实项目日志展开，长度不限；每章旁挂图像/证据 placeholder -->
+    <div class="d2-chapters"></div>
+
+    <div class="d2-specstrip">
+      <div class="d2-spec"><span>Year</span><b class="v2-year"></b></div>
+      <div class="d2-spec"><span>Stack</span><b class="v2-stack"></b></div>
+      <div class="d2-spec"><span>Role</span><b class="v2-role"></b></div>
+      <div class="d2-spec"><span>Status</span><b class="v2-status"></b></div>
+    </div>
+  </div>
+
+  <div class="d2-foot">
+    <button class="d2-backline">← Back to the wheel</button>
+  </div>
+
+  <button class="d-close">← Back to the wheel</button>
+</div>
+
+<script>
+/* ================================================================
+   Tarot wheel homepage · test build
+   规则（用户拍板，改动前先确认）：
+   - 全英文；白底 + 细线星盘；卡片全部正面（placeholder）
+   - 默认停驻（如重返1999参考：三张常驻，中间正对微大）
+   - ‹ › 按钮 / 方向键 左右切换，缓动平滑；无限循环
+   - 顺时针语义保留：向右转 = 右侧降下、左侧升起
+   ================================================================ */
+
+const works = [
+  { num:'XIV',   title:'Multilingual Reading',    sub:'as languages, sliced thin',  motif:'moon', csWIP:true,
+    coverSrc:'assets/tarot-cards/project-i-multilingual-reading-temperance-black-cat-v1-transparent.png',
+    coverSrcEdge:'assets/tarot-cards/project-i-multilingual-reading-temperance-black-cat-v2-transparent.png',
+    coverHeight:'126%', coverTop:'49%',
+    year:'2026', stack:'Three.js · GSAP',      role:'Design & Code', demoHref:'demos/multilingual-slice.html',
+    blurb:'A reading surface that slices paragraphs across languages. Swipe through a text and watch each tongue peel away like fruit.',
+    concept:[
+      'I have spent years reading novels in languages I am still learning, and the hard part was never motivation. Once translation became effortless, the mother tongue version sat one tap away, and the better the tool got, the less time I actually spent inside the language. The crutch was quietly becoming the leg.',
+      'The project I built in response is called Lirey. It has gone through one full build, one cut, and now one idea I have not tested yet. The rule that survived every version so far: help must stay smaller than the effort it is supposed to support.',
+    ],
+    status:'Product exploration · playable demo',
+    demoNote:'The demo isolates one gesture from the V3 idea below: slicing a phrase into its languages.',
+    facts:{
+      made:'A language reading product carried through a full competitive study, a working prototype, a real user pivot, and a third direction I am still only sketching.',
+      operate:'Sweep across a floating phrase in the demo to slice it into language layers, the way V3 imagines a page working.',
+      solves:'Translation tools make the easy path too easy: you end up reading your own language instead of the one you came to practice.',
+      output:'A shelved V1 prototype, a documented pivot away from exam prep, a real design system, and an untested V3 concept this demo is trying to feel out.',
+    },
+    chapters:[
+      {tag:'Discovery', title:'The crutch became the leg',
+       body:['I have read novels in languages I am learning for years. When translation tools got good, the mother tongue version sat one tap away, and I caught myself reading it instead of the language I came to practice. The tool meant to support the learning was quietly replacing it. That contradiction sat with me for over a year before it turned into a project.',
+             'What finally moved it forward was a conversation with a language teacher I respect. He described using AI to write short articles calibrated to exactly his level, then learning vocabulary inside them: interest led, difficulty adjusted, built from real content instead of textbook sentences. That was the seed for what I now call hyper personalization: not simplifying a book, but rendering the same chapter differently depending on who is reading it.'],
+       ph:'founder notes · the original frustration'},
+      {tag:'V1 · How it was made', title:'A reader with every feature I could think of',
+       body:['V1 started as a full featured multilingual reader. I ran a structured teardown of eleven existing products (LingQ, Readlang, Beelinguapp, Lingible, Duoreader, Immersive Translate, Language Reactor, Readest, Goodreads, The StoryGraph, and the baseline e readers) and wrote down what each proved: bilingual reading has real demand, tap to translate is a hard requirement, people already import their own reading material. What none of them did well was personalize by a reader profile, let a user pick between human translations, or brief a reader before the first page.',
+             'I tested my own direction the same honest way: living inside WeChat Reading, Kindle, and Readwise, then the DeepL extension and a Chinese web translator, then reading through a few open source readers on GitHub for how they structured the problem. A design token file came together in under two hours without opening Figma, and a runnable prototype followed from a single session with another model doing the frontend work.',
+             'The self test verdict was plain. The reader worked, and I would not open it again tomorrow. It had no connection to anything I already did daily, and getting started took more will than the reading itself was supposed to save.'],
+       ph:'V0 competitive teardown · eleven products'},
+      {tag:'V2 · Pivot', title:'Built it, then would not use it',
+       body:['If V1 was too polite, V2 tried to be useful on purpose: a daily task screen instead of a bookshelf, and a track that generated IELTS and DELF style comprehension questions from whatever novel you were currently reading. A working prototype came together fast under this framing.',
+             'Then I tested it the way I test everything, by imagining myself back in an exam seat. I would never drill comprehension questions invented from a novel I picked for pleasure. Real candidates drill real past papers; the format, the traps, and the pacing of an actual exam are the whole point, and a book I love does not reproduce any of that. The feature came out whole, not trimmed.',
+             'What the cut clarified was the actual audience: not someone studying for a certificate, but someone who wants to read a real book in a language that is currently too hard for them. That is a bigger, more honest need, and it is the one the project has stayed anchored to since.'],
+       ph:'pivot record · the exam track that got removed'},
+      {tag:'V3 · Conceived, not tested', title:'An idea I am still only sketching',
+       body:['The project sat untouched for a season. Picking it back up, I did not want another round of features; I wanted a version of myself that would actually reach for it. V3 is that question turned into a shape: could making the friction itself a little playful, a small game of slicing a sentence into its languages, be enough to pull me back daily?',
+             'I want to be precise about what this is. The interaction you can play right now is a prototype of a feeling, not a validated mechanic. It has not run against a real book, a real vocabulary list, or a single other reader. Whether a slicing gesture actually teaches anything, or just feels satisfying for a week and then stops mattering, is exactly what V3 still needs to find out.'],
+       ph:'V3 sketches · not yet built'},
+      {tag:'What comes out', title:'A shelved reader and two open questions',
+       body:['What exists today: a documented competitive study, a shelved V1 prototype, a pivot record explaining exactly why the exam track was wrong, a real design system built from Stripe structure, Apple type, and an Airbnb inspired palette (a warm cream reading page instead of stark white), and a playable sketch of a V3 mechanic that has not been tested yet.',
+             'Two questions stay open past this version: where exactly AI assistance should stop so it keeps serving the learner instead of replacing the practice, and whether licensed human translations, chosen edition by edition, could become part of the learning material itself rather than a fallback for when the reading gets hard.'],
+       ph:'design system tokens · Stripe / Apple / Airbnb'},
+    ]},
+  { num:'XI',  title:'Financial Agent',         sub:'as money, weighed',     motif:'key', csWIP:true,
+    coverSrc:'assets/tarot-cards/project-financial-agent-justice-diagonal-sword-fullcolor-v12-transparent.png',
+    coverSrcEdge:'assets/tarot-cards/project-financial-agent-justice-diagonal-sword-selective-v11-transparent.png',
+    coverHeight:'126%', coverTop:'49%',
+    year:'2026', stack:'AI Agents',            role:'Design & Code', demoHref:'#', placeholder:true,
+    blurb:'An AI-assisted financial workflow for turning scattered information into clearer decisions.',
+    status:'Case study in progress',
+  },
+  { num:'X', title:'Project Auto Management', sub:'as a jellyfish, merging',    motif:'eye', csWIP:true,
+    coverSrc:'assets/tarot-cards/project-ii-temperance-navy-gold-v6-transparent.png',
+    coverSrcEdge:'assets/tarot-cards/project-ii-temperance-art-nouveau-frame-v4-transparent.png',
+    coverHeight:'126%', coverTop:'49%',
+    year:'2026', stack:'Canvas · Particles',   role:'Design & Code', demoHref:'demos/jellyfish-merge.html',
+    blurb:'Projects drift as luminous jellyfish. When two ideas belong together they collide softly, fuse, and swim on as one.',
+    concept:[
+      'My projects were not dying from neglect. They were dying in private, buried in logs and folders no one else could read, and half of them turned out to be the same idea wearing different names. I once watched two of my experiments circle each other for weeks before admitting they were one project.',
+      'The jellyfish tank is a portrait of the fix. Underneath it sits a plain operating system: every project keeps a log of pain points and decisions, a board reads those logs to tell me where to push next, and this portfolio reads the board. When two jellyfish fuse on screen, the merge already happened in the file system.',
+    ],
+    status:'Working system · metaphor demo',
+    demoNote:'The merge you see on screen happens in the file system first.',
+    facts:{
+      made:'A three layer system that keeps my projects legible: a log inside every project, an operating board that reads the logs, and this portfolio on top.',
+      operate:'Drag the jellyfish in the demo; kindred projects merge on contact.',
+      solves:'Projects were dying in private folders, and half of them were the same idea under different names.',
+      output:'Living LOG files, a pain point board that tells me where to push next, and case studies that cite their own source documents.',
+    },
+    chapters:[
+      {tag:'Discovery', title:'Dying in private',
+       body:['My projects were not dying from neglect. They were dying invisible: progress buried in logs and folders no one else could read, and half of the ideas turned out to be the same one wearing different names. I once watched two of my experiments circle each other for weeks before admitting they were one project.'],
+       ph:'folder graveyard · before'},
+      {tag:'How it was made', title:'From a ball of loose threads',
+       body:['The first tool was a small board for picking up dropped threads: just enough context per project to restart in minutes instead of an afternoon.',
+             'It grew into a projects board that reads every LOG.md, ranks the recorded pain points, and tells me where pushing next matters most. The habit underneath is strict: every project logs its decisions, its pain, and my reaction to each change.'],
+       ph:'projects board · pain point view'},
+      {tag:'What it solved', title:'Returning became cheap',
+       body:['Paused work stopped being lost work. A project untouched for a month reopens from its log like a bookmark. And merges stopped being tragedies: when two efforts share one spine, their files say so before I do.'],
+       ph:'LOG.md · a real entry'},
+      {tag:'What comes out', title:'This page is the output',
+       body:['The portfolio you are reading is the third layer. It draws from the same logs and boards, so each card traces back to source documents instead of memory. The jellyfish are the portrait; the filing system is the subject.'],
+       ph:'system evolution · three layers'},
+    ]},
+  { num:'VIII',  title:'Use AI Wisely',           sub:'as dominoes, thinking',      motif:'sun', csWIP:true,
+    coverSrc:'assets/tarot-cards/project-iv-use-ai-wisely-strength-diptyque-fullcolor-v3-transparent.png',
+    coverSrcEdge:'assets/tarot-cards/project-iv-use-ai-wisely-strength-diptyque-selective-v2-transparent.png',
+    coverHeight:'126%', coverTop:'49%', coverScaleX:'.86',
+    year:'2026', stack:'Three.js · Cannon',    role:'Design & Code', demoHref:'demos/think-domino.html',
+    blurb:'Every prompt tips a physical domino chain, a tactile argument about how one careless push moves an entire line of thought.',
+    concept:[
+      'The month I started metering my Claude and Codex spend, the bill told a plain story: I was paying reasoning prices for typing. So the labor got split. The expensive model plans, judges, and writes specs. The cheaper one executes volume. A small usage monitor keeps both honest.',
+      'The dominoes are what that discipline feels like from inside. One careless prompt tips an entire line of thought, and the tokens follow wherever attention goes. I’d rather watch the chain fall on screen than watch the invoice do it.',
+    ],
+    status:'Daily practice · metaphor demo',
+    demoNote:'One careless push moves the whole line. So does one careless prompt.',
+    facts:{
+      made:'A working discipline for spending AI attention: metered usage, labor split between models, and specs written before any code.',
+      operate:'Steer the ball in the demo, tip the first domino, and watch the chain spend itself.',
+      solves:'Reasoning models are expensive. Without a system you pay reasoning prices for typing work.',
+      output:'A usage monitor covering Claude and Codex, a token cost playbook, and lower bills for the same quality of output.',
+    },
+    chapters:[
+      {tag:'Discovery', title:'The bill explained itself',
+       body:['The month I started metering my Claude and Codex spend, the pattern was plain: I was paying reasoning prices for typing work. Attention is the actual currency; tokens just denominate it.'],
+       ph:'usage monitor · monthly view'},
+      {tag:'How it was made', title:'Splitting the labor',
+       body:['The expensive model keeps the judgment: strategy, specs, and the calls that are costly to get wrong. The cheaper model executes volume against those specs. A small monitor watches both, so the split stays honest month over month.'],
+       ph:'division of labor · diagram'},
+      {tag:'How it was made', title:'A playbook, not a vibe',
+       body:['The token research became a written playbook: what belongs in context, what caching actually saves, when a long prompt is discipline and when it is waste. Rules I can hand to the next project instead of relearning them by invoice.'],
+       ph:'token playbook · excerpt'},
+      {tag:'What comes out', title:'Cheaper months, same output',
+       body:['Lower bills without lower quality, and a domino run that shows the feeling: one careless push moves an entire line of thought. So does one careless prompt.'],
+       ph:'spend · before and after'},
+    ]},
+  { num:'I',   title:'Daily Rituals',       sub:'as todo and diary, conjured',         motif:'star', csWIP:true,
+    coverSrc:'assets/tarot-cards/project-daily-rituals-magician-white-cat-crow-fullcolor-v6-transparent.png',
+    coverSrcEdge:'assets/tarot-cards/project-daily-rituals-magician-white-cat-crow-selective-v2-transparent.png',
+    coverHeight:'126%', coverTop:'49%',
+    year:'2026', stack:'Discord · AI Workflows', role:'Design & Code', demoHref:'#', placeholder:true,
+    blurb:'A Discord to-do bot and a journaling workflow, folded into one card because they solve the same daily problem: catch it now, sort it later.',
+    status:'Placeholder · content in progress',
+  },
+];
+
+/* thin-line placeholder motifs (swap for generated art later) */
+const MOTIFS = {
+  sun: `<circle cx="50" cy="50" r="20"/><g id="rays"></g>`,
+  moon:`<path d="M62 18 A36 36 0 1 0 62 82 A28 28 0 1 1 62 18"/><circle cx="26" cy="30" r="1.6"/><circle cx="34" cy="70" r="1.2"/>`,
+  eye: `<path d="M10 50 Q50 16 90 50 Q50 84 10 50 Z"/><circle cx="50" cy="50" r="13"/><circle cx="50" cy="50" r="4"/><path d="M50 10 L50 22 M50 78 L50 90"/>`,
+  star:`<path d="M50 12 L57 40 L86 40 L62 56 L71 84 L50 66 L29 84 L38 56 L14 40 L43 40 Z"/>`,
+  key: `<circle cx="50" cy="32" r="16"/><path d="M50 48 L50 88 M50 72 L64 72 M50 82 L60 82"/>`,
+  hourglass:`<path d="M28 14 L72 14 L72 26 Q72 44 50 50 Q28 44 28 26 Z M28 86 L72 86 L72 74 Q72 56 50 50 Q28 56 28 74 Z"/><path d="M22 14 L78 14 M22 86 L78 86"/>`,
+};
+function motifInner(name){
+  let inner = MOTIFS[name] || MOTIFS.star;
+  if(name==='sun'){
+    let rays='';
+    for(let i=0;i<12;i++){
+      const a=i*Math.PI/6, r1=26, r2=34;
+      rays+=`<line x1="${50+r1*Math.cos(a)}" y1="${50+r1*Math.sin(a)}" x2="${50+r2*Math.cos(a)}" y2="${50+r2*Math.sin(a)}"/>`;
+    }
+    inner = inner.replace('<g id="rays"></g>', `<g>${rays}</g>`);
+  }
+  return inner;
+}
+function motifSvg(name){
+  return `<svg viewBox="0 0 100 100">${motifInner(name)}</svg>`;
+}
+function renderArtwork(w){
+  if(w.coverSrc){
+    const coverStyle = [
+      w.coverHeight && `--cover-height:${w.coverHeight}`,
+      w.coverTop && `--cover-top:${w.coverTop}`,
+      w.coverScaleX && `--cover-scale-x:${w.coverScaleX}`,
+    ].filter(Boolean).join(';');
+    const styleAttr = coverStyle ? ` style="${coverStyle}"` : '';
+    const center = `<img class="card-cover cover-center" src="${w.coverSrc}" alt="" aria-hidden="true"${styleAttr}>`;
+    /* 居中显色、转出去显浅：coverSrcEdge 是同一构图的淡色版，叠在上面靠 opacity 交叉淡出 */
+    if(w.coverSrcEdge){
+      const edge = `<img class="card-cover cover-edge" src="${w.coverSrcEdge}" alt="" aria-hidden="true"${styleAttr}>`;
+      return center + edge;
+    }
+    return center;
+  }
+  return motifSvg(w.motif);
+}
+
+/* ---------------- geometry & wheel constants ---------------- */
+const SPACING = 19;          // deg between neighbours — tight, like the 1999 ref
+const SLOTS   = 7;           // 3 prominent + cropped neighbours + buffer
+const SPAN    = SLOTS * SPACING;
+const EASE    = 7;           // easing stiffness (per second)
+
+const stage = document.getElementById('stage');
+const wheelSvg = document.getElementById('wheelSvg');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let W, H, R, CX, CY, cardW, cardH;
+
+function computeGeometry(){
+  W = innerWidth; H = innerHeight;
+  cardH = Math.max(280, Math.min(H*0.52, 530));   // bigger cards, 1999-ref presence
+  cardW = cardH / 1.66;
+  R  = H * 1.40;                 // huge wheel → gentle top arc
+  CX = W / 2;
+  CY = H * 0.54 + R;             // hub below viewport; side cards crop at the bottom edge
+}
+
+/* ---------------- slots & infinite recycling ----------------
+   θ=0 is straight up. Clockwise turn (offset ↑): cards drift right,
+   sink on the right, rise back in from the left — and vice versa.
+   Ring reads (left→right) as consecutive deck order, so the card
+   passing centre goes I, II, III… forward and VII, VI… backward. */
+const slots = [];
+let offset = 0, targetOffset = 0;
+
+function makeCard(){
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `<div class="card-inner">
+      <div class="card-frame"></div>
+      <div class="card-art"></div>
+      <div class="card-title"></div>
+      <div class="card-sub"></div>
+    </div>`;
+  stage.appendChild(el);
+  return el;
+}
+
+function assignWork(slot){
+  const w = works[slot.workIdx % works.length];
+  slot.el.classList.toggle('has-cover', Boolean(w.coverSrc));
+  slot.el.classList.toggle('is-placeholder', Boolean(w.placeholder));
+  slot.el.querySelector('.card-art').innerHTML = renderArtwork(w);
+  slot.coverEdgeEl = slot.el.querySelector('.cover-edge');   // 交叉淡出目标，layout() 逐帧驱动
+  slot.el.querySelector('.card-title').textContent = w.title;
+  slot.el.querySelector('.card-sub').textContent = w.sub;
+  slot.el.onclick = w.placeholder ? null : ()=> openDetail(w);
+}
+
+function initSlots(){
+  const N = works.length, shift = (SLOTS-1)>>1;
+  for(let i=0;i<SLOTS;i++){
+    const slot = {
+      el: makeCard(),
+      base: (i - (SLOTS-1)/2) * SPACING,   // fixed home angle, offset added on top
+      angle: 0,
+      // left→right descending deck order; centre slot starts at work I
+      workIdx: (((SLOTS-1-i-shift) % N) + N) % N,
+    };
+    slot.angle = slot.base;
+    assignWork(slot);
+    slots.push(slot);
+  }
+}
+
+/* entering card = neighbour of the current extreme → self-correcting,
+   never duplicates a card still visible on the wheel */
+function nextEntrantWork(){          // enters from the LEFT (clockwise turn)
+  let m = slots[0];
+  for(const s of slots) if(s.angle < m.angle) m = s;
+  return (m.workIdx + 1) % works.length;
+}
+function prevEntrantWork(){          // enters from the RIGHT (backward turn)
+  let m = slots[0];
+  for(const s of slots) if(s.angle > m.angle) m = s;
+  return (m.workIdx - 1 + works.length) % works.length;
+}
+
+/* ---------------- layout ---------------- */
+function layout(slot){
+  const t = slot.angle * Math.PI/180;
+  const x = CX + R * Math.sin(t);
+  const y = CY - R * Math.cos(t);
+  const a = Math.abs(slot.angle);
+  const opacity = Math.max(0, Math.min(1, 1 - (a-26)/16));   // ±1 full, ±2 dimmed & cropped
+  const scale = 1 + Math.max(0, (10-a)/10) * 0.06;   // centre card slightly larger
+  slot.el.style.width  = cardW+'px';
+  slot.el.style.height = cardH+'px';
+  slot.el.style.opacity = opacity;
+  slot.el.style.pointerEvents = opacity > 0.5 ? 'auto' : 'none';
+  slot.el.style.zIndex = String(100 - Math.round(a));
+  slot.el.style.transform =
+    `translate(${x - cardW/2}px, ${y - cardH/2}px) rotate(${slot.angle}deg) scale(${scale})`;
+  if(slot.coverEdgeEl){
+    // 居中（a=0）显色版；转过约半格卡位（a≈9°）就已完全切到浅色版
+    slot.coverEdgeEl.style.opacity = String(Math.max(0, Math.min(1, a/9)));
+  }
+}
+
+/* ---------------- parked wheel + eased stepping ---------------- */
+const counter = document.getElementById('counter');
+function updateCounter(){
+  let c = slots[0];
+  for(const s of slots) if(Math.abs(s.angle) < Math.abs(c.angle)) c = s;
+  const w = works[c.workIdx];
+  counter.replaceChildren();
+  const title = document.createElement('span');
+  title.className = 'counter-title';
+  title.textContent = w.title;
+  const page = document.createElement('span');
+  page.className = 'counter-page';
+  /* 左边真实大阿卡纳牌位数，右边无穷符号——牌组是循环的，没有"总数"这回事 */
+  page.textContent = `${w.num} / ∞`;
+  counter.append(title, page);
+}
+
+/* 回收 + 布局 + 计数 + 过卡滴答，easing / 惯性滑行 / 手抓 三种驱动共用 */
+function applyWheel(){
+  for(const slot of slots){
+    let a = slot.base + offset;
+    if(a > SPAN/2){        // sank past the right exit
+      slot.workIdx = nextEntrantWork();
+      slot.base -= SPAN; a -= SPAN;      // re-enter rising on the left
+      assignWork(slot);
+    } else if(a < -SPAN/2){ // pushed past the left exit (backward turn)
+      slot.workIdx = prevEntrantWork();
+      slot.base += SPAN; a += SPAN;      // re-enter sinking on the right
+      assignWork(slot);
+    }
+    slot.angle = a;
+    layout(slot);
+  }
+  updateCounter();
+  notchCheck();
+}
+
+/* ---- 转轮音效：每越过一个卡位，随机敲一个音阶音符（真实素材，音阶来自 assets/audio/scale/） ---- */
+let actx=null;
+const SCALE_NOTES = ['do','re','mi','fa','sol','la','si','do-hi','re-hi','mi-hi','fa-hi','sol-hi']
+  .map((n,i)=>`assets/audio/scale/scale-${String(i+1).padStart(2,'0')}-${n}.wav`);
+let scaleBuffers=null, scaleLoading=null;
+function ensureAudio(){
+  try{
+    if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended') actx.resume();
+    if(!scaleBuffers && !scaleLoading){
+      scaleLoading = Promise.all(SCALE_NOTES.map(src =>
+        fetch(src).then(r=>r.arrayBuffer()).then(buf=>actx.decodeAudioData(buf))
+      )).then(buffers => { scaleBuffers = buffers; }).catch(()=>{ scaleLoading=null; });
+    }
+  }catch(e){ /* 无音频环境则静默 */ }
+}
+function playTick(speed){
+  if(!actx || actx.state!=='running' || !scaleBuffers) return;
+  const t=actx.currentTime;
+  const src=actx.createBufferSource(), g=actx.createGain();
+  src.buffer = scaleBuffers[Math.floor(Math.random()*scaleBuffers.length)];
+  const v=Math.min(0.5, 0.2 + Math.abs(speed)/3200);   // 转得越快敲得越响一点
+  g.gain.setValueAtTime(v,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.16);   // 原始音符有1秒多的尾巴，截短成轻快的一敲
+  src.connect(g); g.connect(actx.destination);
+  src.start(t); src.stop(t+0.2);
+}
+let lastNotch=0;
+function notchCheck(){
+  const n=Math.round(offset/SPACING);
+  if(n!==lastNotch){ lastNotch=n; playTick(spinVel || (targetOffset-offset)*EASE); }
+}
+
+/* ---- 惯性：松手后按角速度滑行，摩擦衰减，慢到阈值再吸附卡位 ---- */
+let coasting=false, spinVel=0;         // deg/s
+const FRICTION=0.95, SNAP_VEL=22;      // 摩擦更小 → 滑得更远更久
+
+let last = performance.now();
+function tick(now){
+  const dt = Math.min(0.05, (now - last)/1000);
+  last = now;
+  if(coasting){
+    offset += spinVel*dt;
+    spinVel *= Math.exp(-FRICTION*dt);
+    if(Math.abs(spinVel) < SNAP_VEL){
+      coasting=false; spinVel=0;
+      targetOffset = Math.round(offset/SPACING)*SPACING;   // 收尾吸附
+    } else {
+      targetOffset = offset;
+    }
+    applyWheel();
+  } else {
+    const diff = targetOffset - offset;
+    if(Math.abs(diff) > 0.005){
+      // 抓轮时用更高刚度（≈45ms 追平）：既跟手又保持 60fps 平滑插值
+      const k = grabbing ? 22 : EASE;
+      offset += reduceMotion ? diff : diff * (1 - Math.exp(-k*dt));
+      if(Math.abs(targetOffset - offset) <= 0.005) offset = targetOffset;
+      applyWheel();
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function turn(dir){ ensureAudio(); coasting=false; spinVel=0; targetOffset += dir * SPACING; }   // +1 = clockwise (right sinks)
+/* 用户反馈：点右箭头应该让右边的卡进中心，不是左边的卡飘过来——
+   turn(+1) 内部语义（顺时针/右侧下沉）不动，只是把按钮/键盘接反过来 */
+document.getElementById('nextBtn').addEventListener('click', ()=> turn(-1));
+document.getElementById('prevBtn').addEventListener('click', ()=> turn(+1));
+addEventListener('keydown', e=>{
+  if(detailOpen) return;
+  if(e.key==='ArrowRight') turn(-1);
+  if(e.key==='ArrowLeft')  turn(+1);
+});
+
+function drawWheelLines(){
+  const NS='http://www.w3.org/2000/svg';
+  wheelSvg.innerHTML='';
+  wheelSvg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const g=document.createElementNS(NS,'g');
+  g.setAttribute('stroke','#b3925e'); g.setAttribute('fill','none');
+
+  /* 1999-style thin arc: hub-concentric, sweeping across the upper screen
+     (vector — stays crisp at any size). Main line + fainter dashed companion. */
+  const arcs=[
+    {r: CY - H*0.22, w:.9, o:.5,  dash:''},
+    {r: CY - H*0.19, w:.6, o:.28, dash:'2 7'},
+  ];
+  for(const a of arcs){
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('cx',CX); c.setAttribute('cy',CY); c.setAttribute('r',a.r);
+    c.setAttribute('stroke-width',a.w); c.setAttribute('opacity',a.o);
+    if(a.dash) c.setAttribute('stroke-dasharray',a.dash);
+    g.appendChild(c);
+  }
+
+  /* sun ornament above the masthead — placeholder for the bronze sun statue */
+  const sx=W/2, sy=44;
+  const sun=document.createElementNS(NS,'g');
+  sun.setAttribute('opacity','.65');
+  const sc=document.createElementNS(NS,'circle');
+  sc.setAttribute('cx',sx); sc.setAttribute('cy',sy); sc.setAttribute('r',9);
+  sc.setAttribute('stroke-width',.8);
+  sun.appendChild(sc);
+  for(let i=0;i<16;i++){
+    const a=i*Math.PI/8, r1=13, r2=i%2? 17:21;
+    const l=document.createElementNS(NS,'line');
+    l.setAttribute('x1',sx+r1*Math.cos(a)); l.setAttribute('y1',sy+r1*Math.sin(a));
+    l.setAttribute('x2',sx+r2*Math.cos(a)); l.setAttribute('y2',sy+r2*Math.sin(a));
+    l.setAttribute('stroke-width',.6);
+    sun.appendChild(l);
+  }
+  g.appendChild(sun);
+  wheelSvg.appendChild(g);
+}
+
+/* ---------------- drifting dust ---------------- */
+const dustCanvas=document.getElementById('dust');
+const dctx=dustCanvas.getContext('2d');
+let dust=[];
+function initDust(){
+  dustCanvas.width=W; dustCanvas.height=H;
+  const sc=document.getElementById('stars');
+  sc.width=W; sc.height=H;
+  dust=Array.from({length:42},()=>({
+    x:Math.random()*W, y:Math.random()*H,
+    r:.6+Math.random()*1.4, v:4+Math.random()*10,
+    sway:Math.random()*Math.PI*2, a:.12+Math.random()*.2,
+  }));
+}
+function drawDust(dt){
+  dctx.clearRect(0,0,W,H);
+  dctx.fillStyle='#8a7350';
+  for(const p of dust){
+    p.y-=p.v*dt; p.sway+=dt*.6;
+    if(p.y<-4){ p.y=H+4; p.x=Math.random()*W; }
+    dctx.globalAlpha=p.a;
+    dctx.beginPath();
+    dctx.arc(p.x+Math.sin(p.sway)*8, p.y, p.r, 0, Math.PI*2);
+    dctx.fill();
+  }
+  dctx.globalAlpha=1;
+}
+let dustLast=performance.now();
+function dustTick(now){
+  const dt=Math.min(.05,(now-dustLast)/1000); dustLast=now;
+  if(!reduceMotion) drawDust(dt);
+  drawStars(dt);                       // 指尖星星与尘埃同频渲染
+  requestAnimationFrame(dustTick);
+}
+
+/* ---------------- detail page (Dior J'adore style) ----------------
+   巨幅衬线标题横贯整页并向两侧出血，悬浮的塔罗卡盖在标题中段，
+   下方居中一段正文 + 一行元数据 + demo 按钮 */
+const detail=document.getElementById('detail');
+const detailHero=detail.querySelector('.d2-hero');
+const detailGame=detail.querySelector('.d2-game');
+const detailGameFrame=document.getElementById('d2-game-frame');
+let detailOpen=false;
+
+function fitHeadline(text){
+  const head=detail.querySelector('.d2-head');
+  head.textContent=text;
+  head.style.fontSize='100px';
+  // visibility:hidden 仍参与布局，可直接测量
+  const measured=head.scrollWidth || 1;
+  let size=100 * (W*0.98)/measured;          // 贴满视口宽，不出血裁字
+  size=Math.min(size, H*0.24);               // 短标题别撑成怪物
+  size=Math.max(size, 44);
+  head.style.fontSize=size+'px';
+}
+
+function openDetail(w){
+  fitHeadline(w.title);
+  detail.querySelector('.d2-sections').classList.toggle('is-wip', Boolean(w.csWIP));
+  const card=detail.querySelector('.d2-card');
+  const hasGame=Boolean(w.demoHref && w.demoHref!=='#');
+  detailHero.classList.toggle('has-game', hasGame);
+  if(hasGame){
+    const joiner=w.demoHref.includes('?') ? '&' : '?';
+    /* v=时间戳：防 iframe 吃旧缓存（demo 迭代频繁，静态站点无缓存头） */
+    detailGameFrame.src=`${w.demoHref}${joiner}embedded=1&v=${Date.now()}`;
+    detailGameFrame.title=`${w.title} interactive demo`;
+    detailGame.removeAttribute('aria-hidden');
+  } else {
+    detailGameFrame.src='about:blank';
+    detailGameFrame.title='No interactive demo available';
+    detailGame.setAttribute('aria-hidden','true');
+  }
+  card.classList.toggle('has-cover', Boolean(w.coverSrc));
+  card.querySelector('.card-art').innerHTML=renderArtwork(w);
+  card.querySelector('.card-title').textContent=w.title;
+  card.querySelector('.card-sub').textContent=w.sub;
+  detail.querySelector('.d2-blurb').textContent=w.blurb||'';
+  detail.querySelector('.d2-meta').textContent=
+    `No. ${w.num} · ${w.year||'—'} · ${w.stack||'—'} · ${w.role||'—'}`;
+  for(const demo of detail.querySelectorAll('.d-demo')){
+    if(w.demoHref && w.demoHref!=='#'){ demo.href=w.demoHref; demo.classList.remove('disabled'); }
+    else { demo.removeAttribute('href'); demo.classList.add('disabled'); }
+  }
+  /* one-pager 章节内容 */
+  const fig=detail.querySelector('.d2-figart');
+  fig.innerHTML = w.coverSrc
+    ? `<img src="${w.coverSrc}" alt="">`
+    : motifSvg(w.motif);
+  const cp = w.concept || [w.blurb||'', ''];
+  detail.querySelector('.d2-concept').textContent = cp[0] || '';
+  detail.querySelector('.d2-concept2').textContent = cp[1] || '';
+  /* 状态标签 + 四问块 + 证据区（Codex 叙事重构：先事实，后诗意） */
+  detail.querySelector('.d2-status').textContent = w.status || '';
+  detail.querySelector('.d2-demonote').textContent = w.demoNote || '';
+  const f = w.facts || {};
+  detail.querySelector('.f-made').textContent    = f.made    || '';
+  detail.querySelector('.f-operate').textContent = f.operate || '';
+  detail.querySelector('.f-solves').textContent  = f.solves  || '';
+  detail.querySelector('.f-output').textContent  = f.output  || '';
+  /* 编年章节：{tag,title,body[],ph} → 文字列 + placeholder 列（有 img 字段时换真图） */
+  detail.querySelector('.d2-chapters').replaceChildren(
+    ...(w.chapters || []).map(ch=>{
+      const row=document.createElement('div'); row.className='d2-chap';
+      const tx=document.createElement('div'); tx.className='d2-chap-text';
+      const tag=document.createElement('div'); tag.className='d2-chap-tag';
+      tag.textContent=ch.tag||'';
+      const h=document.createElement('h4'); h.textContent=ch.title||'';
+      tx.append(tag,h);
+      for(const para of ch.body||[]){
+        const p=document.createElement('p'); p.textContent=para; tx.append(p);
+      }
+      let fig;
+      if(ch.img){
+        fig=document.createElement('img');
+        fig.src=ch.img; fig.alt=ch.ph||''; fig.className='d2-chap-img';
+        fig.style.cssText='width:100%;height:auto;display:block;box-shadow:26px 30px 0 rgba(43,37,29,.07)';
+      } else {
+        fig=document.createElement('div'); fig.className='d2-ph';
+        const em=document.createElement('em'); em.textContent='Placeholder';
+        const cap=document.createElement('span'); cap.textContent=ch.ph||'image forthcoming';
+        fig.append(em,cap);
+      }
+      row.append(tx,fig); return row;
+    })
+  );
+  detail.querySelector('.v2-year').textContent=w.year||'—';
+  detail.querySelector('.v2-stack').textContent=w.stack||'—';
+  detail.querySelector('.v2-role').textContent=w.role||'—';
+  detail.querySelector('.v2-status').textContent=w.status||'—';
+  detail.scrollTop=0;                       // 每次打开回到顶部
+  detail.classList.add('open'); detailOpen=true;
+}
+function closeDetail(){
+  detail.classList.remove('open'); detailOpen=false;
+  detailHero.classList.remove('has-game');
+  detailGameFrame.src='about:blank';
+}
+detail.querySelector('.d2-backline').addEventListener('click',closeDetail);
+detail.querySelector('.d-close').addEventListener('click',closeDetail);
+addEventListener('keydown',e=>{ if(e.key==='Escape' && detailOpen) closeDetail(); });
+
+/* ---------------- hand gesture control (MediaPipe Hands) ----------------
+   规则（用户拍板）：手势只管转轮，不打开/关闭卡片。
+   OPEN 张掌=抓住转轮（左右移动直接跟手），松手带惯性滑行再吸附。
+   摄像头画面不展示——指尖化作金色星星实时反馈"已被识别"。
+   渐进增强：点开关才加载 CDN + 请求摄像头；任何失败回落鼠标模式。
+   注意：getUserMedia 需要 localhost / https（file:// 下不可用）。 */
+const handToggle=document.getElementById('handToggle');
+const camWrap=document.getElementById('camWrap');
+const camVideo=document.getElementById('camVideo');
+const camStatus=document.getElementById('camStatus');
+
+let gestureOn=false, handsInst=null, camStream=null;
+let lastHandX=null, lastSeen=0, grabbing=false;
+let velEMA=0, lastMoveT=0;
+const FOLLOW_K=135;           // 跟手灵敏度（越大越灵）
+const MAX_SPIN=720;           // 甩出去的最大角速度 deg/s
+
+function dist2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+/* 21 个关键点 → 手势分类（只区分张掌/其他；捏合、握拳都视为松手） */
+function classifyGesture(lm){
+  const pairs=[[8,6],[12,10],[16,14],[20,18]];   // 食/中/无名/小指 tip vs pip
+  let ext=0;
+  for(const [t,p] of pairs) if(dist2(lm[t],lm[0]) > dist2(lm[p],lm[0])*1.15) ext++;
+  return ext>=3 ? 'open' : 'other';
+}
+
+function releaseGrab(){
+  grabbing=false; lastHandX=null;
+  spinVel=Math.max(-MAX_SPIN, Math.min(MAX_SPIN, velEMA));
+  velEMA=0;
+  if(Math.abs(spinVel) > 40){          // 甩得够快 → 惯性滑行（阈值调低，轻甩也有惯性）
+    coasting=true; targetOffset=offset;
+    camStatus.textContent='✋ spinning…';
+  } else {                             // 轻轻松手 → 直接吸附
+    spinVel=0; coasting=false;
+    targetOffset=Math.round(offset/SPACING)*SPACING;
+    camStatus.textContent='✋ open palm to grab the wheel';
+  }
+}
+
+function onHandResults(res){
+  const now=performance.now();
+  const lms=res.multiHandLandmarks;
+  eyeFrame(lms);                       // 掌心之眼 + 牵线燕子
+  if(!lms || !lms.length){
+    if(grabbing && now-lastSeen>300) releaseGrab();
+    return;
+  }
+  lastSeen=now;
+  const lm=lms[0];
+  const g=classifyGesture(lm);
+  const x=1-lm[9].x;   // 镜像：中指根部作为手的位置
+
+  if(g==='open' && !detailOpen){
+    if(!grabbing){
+      grabbing=true; coasting=false; spinVel=0;
+      lastHandX=x; lastMoveT=now; velEMA=0;
+      camStatus.textContent='✋ holding — move or flick';
+    } else {
+      const dts=Math.max(8, now-lastMoveT)/1000;
+      const dOff=(x-lastHandX)*FOLLOW_K;
+      // 只推目标值，渲染由 60fps 主循环用高刚度缓动追——
+      // 避免转轮更新被锁在手部识别的低帧率上（卡顿根源）
+      targetOffset += dOff;
+      velEMA = 0.65*velEMA + 0.35*(dOff/dts);        // 平滑角速度，供甩出惯性
+      lastHandX=x; lastMoveT=now;
+    }
+  } else if(grabbing){
+    releaseGrab();
+  }
+}
+
+/* ---- 金色四角星留影：燕子沿途洒下（原指尖星星粒子系统，发射源改为鸟） ---- */
+const starCanvas=document.getElementById('stars');
+const sctx=starCanvas.getContext('2d');
+let starParts=[];
+/* ---- 掌心之眼 + 牵线燕子（Control 参考图：眼出线牵鸟，鸟挣脱、沿途掉金线） ---- */
+const palmEye={
+  x:0,y:0,r:0,alpha:0,tx:0,ty:0,tr:0,lastT:-1e9,
+  blinkStart:-1,nextBlink:performance.now()+1400,blinkSwitched:false,pupilIndex:0,
+};
+const palmPupilColors=['#2b251d','#5966ad','#2b847b','#b88b32','#945f8f'];
+let birds=[];
+
+function eyeFrame(lms){
+  if(!lms || !lms.length) return;
+  const lm=lms[0];
+  let cx=0, cy=0;
+  for(const i of [0,5,9,13,17]){ cx+=(1-lm[i].x); cy+=lm[i].y; }   // 腕+四指根 → 掌心
+  palmEye.tx=cx/5*W; palmEye.ty=cy/5*H;
+  const span=Math.hypot((lm[9].x-lm[0].x)*W, (lm[9].y-lm[0].y)*H); // 手的尺度
+  palmEye.tr=Math.max(16, Math.min(44, span*0.30));
+  palmEye.lastT=performance.now();
+}
+
+function spawnBird(){
+  const a=Math.random()*Math.PI*2;
+  const leash=150+birds.length*80;                 // 两只鸟线长不同
+  birds.push({
+    x:palmEye.x+Math.cos(a)*leash*0.6, y:palmEye.y+Math.sin(a)*leash*0.6,
+    vx:Math.cos(a)*80, vy:Math.sin(a)*80,
+    size:11+Math.random()*4, leash,
+    phase:Math.random()*Math.PI*2,
+    wander:a, wt:0, trailAcc:0,
+  });
+}
+
+function updateBirds(dt){
+  const ex=palmEye.x, ey=palmEye.y;
+  for(const b of birds){
+    b.phase+=dt*(9+6*Math.min(1,Math.hypot(b.vx,b.vy)/220));       // 越急扑得越快
+    b.wt-=dt;
+    const dx=b.x-ex, dy=b.y-ey, d=Math.hypot(dx,dy)||1;
+    if(b.wt<=0){
+      b.wt=0.4+Math.random()*0.7;
+      b.wander=Math.random()*Math.PI*2;
+      if(d>b.leash*0.9){                            // 绷到线端 → 侧向猛拽一下（挣扎感）
+        const side=Math.random()<.5?1:-1;
+        b.vx+=-dy/d*side*170; b.vy+=dx/d*side*170;
+      }
+    }
+    let ax=Math.cos(b.wander)*230 + dx/d*150;       // 游走 + 向外逃
+    let ay=Math.sin(b.wander)*150 + dy/d*150;
+    if(d>b.leash){ const f=(d-b.leash)*16; ax-=dx/d*f; ay-=dy/d*f; }   // 线拉住
+    const damp=Math.exp(-1.5*dt);
+    b.vx=(b.vx+ax*dt)*damp; b.vy=(b.vy+ay*dt)*damp;
+    const px=b.x, py=b.y;
+    b.x+=b.vx*dt; b.y+=b.vy*dt;
+    b.trailAcc+=Math.hypot(b.x-px, b.y-py);         // 所过之处洒下星星留影
+    while(b.trailAcc>13){
+      b.trailAcc-=13;
+      starParts.push({
+        x:b.x+(Math.random()-.5)*8, y:b.y+(Math.random()-.5)*8,
+        life:1, size:3.5+Math.random()*5,
+        rot:Math.random()*Math.PI, spin:(Math.random()-.5)*3,
+        dx:(Math.random()-.5)*16, dy:4+Math.random()*14,   // 近乎停驻，微微下沉
+        color:palmPupilColors[palmEye.pupilIndex],         // 出生时锁定当前瞳色
+      });
+    }
+  }
+  if(starParts.length>240) starParts.splice(0, starParts.length-240);
+}
+
+function drawEyeAndBirds(dt){
+  const now=performance.now();
+  const active=now-palmEye.lastT < 300;
+  palmEye.alpha += ((active?1:0)-palmEye.alpha) * Math.min(1, dt*6);
+  if(palmEye.alpha<0.04){
+    birds.length=0;
+    palmEye.blinkStart=-1;
+    palmEye.nextBlink=now+1400;
+    return;
+  }
+  const k=1-Math.exp(-12*dt);                       // 眼位快速跟手
+  palmEye.x+=(palmEye.tx-palmEye.x)*k;
+  palmEye.y+=(palmEye.ty-palmEye.y)*k;
+  palmEye.r+=(palmEye.tr-palmEye.r)*k;
+  if(palmEye.alpha>0.5 && birds.length<2) spawnBird();
+  updateBirds(dt);
+  const A=palmEye.alpha;
+  const ex=palmEye.x, ey=palmEye.y, r=palmEye.r;
+
+  /* 掌心之眼：EOD 标志的白色眼白与粉色虹膜；闭眼中点切换瞳色。 */
+  const look=birds.length
+    ? Math.atan2(birds[0].y-ey, birds[0].x-ex) : 0;
+  const px=Math.cos(look)*r*0.18, py=Math.sin(look)*r*0.12;
+
+  if(palmEye.blinkStart<0 && now>=palmEye.nextBlink){
+    palmEye.blinkStart=now;
+    palmEye.blinkSwitched=false;
+  }
+  let blinkOpen=1;
+  if(palmEye.blinkStart>=0){
+    const blinkProgress=(now-palmEye.blinkStart)/280;
+    if(blinkProgress>=1){
+      palmEye.blinkStart=-1;
+      palmEye.nextBlink=now+2200+Math.random()*2200;
+      palmEye.blinkSwitched=false;
+    } else {
+      blinkOpen=Math.max(0.045, 1-Math.pow(Math.sin(Math.PI*blinkProgress),1.55));
+      if(blinkProgress>=0.5 && !palmEye.blinkSwitched){
+        palmEye.pupilIndex=(palmEye.pupilIndex+1)%palmPupilColors.length;
+        palmEye.blinkSwitched=true;
+      }
+    }
+  }
+
+  sctx.save();
+  sctx.translate(ex,ey);
+  sctx.scale(1,blinkOpen);
+  sctx.translate(-ex,-ey);
+  sctx.globalAlpha=A;
+  sctx.fillStyle='#fff';
+  sctx.strokeStyle='#e57f88';
+  sctx.lineWidth=Math.max(1.25,r*0.045);
+  sctx.beginPath();                                  // 白色杏形眼白
+  sctx.moveTo(ex-r,ey);
+  sctx.quadraticCurveTo(ex,ey-r*0.62,ex+r,ey);
+  sctx.quadraticCurveTo(ex,ey+r*0.62,ex-r,ey);
+  sctx.closePath();
+  sctx.fill();
+  sctx.stroke();
+  sctx.fillStyle='#ef858d';                          // 固定的珊瑚粉虹膜
+  sctx.beginPath();
+  sctx.arc(ex+px,ey+py,r*0.37,0,Math.PI*2);
+  sctx.fill();
+  sctx.fillStyle=palmPupilColors[palmEye.pupilIndex];
+  sctx.beginPath();                                  // 每次眨眼换色的瞳仁
+  sctx.arc(ex+px,ey+py,r*0.19,0,Math.PI*2);
+  sctx.fill();
+  sctx.restore();
+
+  /* 牵线在眼球上层，从瞳仁中心穿出；小鸟稍后绘制，仍压在线上。 */
+  const lineX=ex+px, lineY=ey+py;
+  sctx.strokeStyle='#a8503f';
+  sctx.lineWidth=0.9;
+  for(const b of birds){
+    const d=Math.hypot(b.x-lineX,b.y-lineY)||1;
+    const sag=Math.max(0,b.leash-d)*0.35+6;
+    const mx=(lineX+b.x)/2, my=(lineY+b.y)/2+sag;
+    sctx.globalAlpha=A*0.55;
+    sctx.beginPath();
+    sctx.moveTo(lineX,lineY);
+    sctx.quadraticCurveTo(mx,my,b.x,b.y);
+    sctx.stroke();
+  }
+
+  /* 燕子（墨色剪影，双翼随扑翻收放） */
+  sctx.fillStyle='#2f2a24';
+  for(const b of birds){
+    const ang=Math.atan2(b.vy,b.vx), s=b.size;
+    const m=0.45+0.75*(0.5+0.5*Math.sin(b.phase));  // 翼展 0.45~1.2
+    sctx.save();
+    sctx.translate(b.x,b.y); sctx.rotate(ang);
+    sctx.globalAlpha=A*0.9;
+    sctx.beginPath();                                // 身体 + 燕尾
+    sctx.moveTo(s*0.95,0);
+    sctx.quadraticCurveTo(0,s*0.26,-s*0.7,s*0.09);
+    sctx.lineTo(-s*1.2,s*0.34); sctx.lineTo(-s*0.62,0); sctx.lineTo(-s*1.2,-s*0.34);
+    sctx.lineTo(-s*0.7,-s*0.09);
+    sctx.quadraticCurveTo(0,-s*0.26,s*0.95,0);
+    sctx.fill();
+    for(const side of [1,-1]){                       // 双翼（后掠尖翼）
+      sctx.beginPath();
+      sctx.moveTo(s*0.25,0);
+      sctx.quadraticCurveTo(s*0.05,side*s*0.6*m,-s*0.8,side*s*1.05*m);
+      sctx.quadraticCurveTo(-s*0.28,side*s*0.3*m,-s*0.38,0);
+      sctx.closePath(); sctx.fill();
+    }
+    sctx.restore();
+  }
+  sctx.globalAlpha=1;
+}
+
+function drawStars(dt){
+  sctx.clearRect(0,0,W,H);
+  drawEyeAndBirds(dt);                 // 眼/鸟/金线（无手自然淡出）
+  if(!starParts.length){ sctx.globalAlpha=1; return; }
+  starParts=starParts.filter(s=>(s.life-=dt*1.7)>0);
+  for(const s of starParts){
+    s.rot+=s.spin*dt; s.x+=s.dx*dt; s.y+=s.dy*dt;
+    const r=s.size*(0.45+0.55*s.life);
+    sctx.save();
+    sctx.translate(s.x,s.y); sctx.rotate(s.rot);
+    sctx.globalAlpha=s.life*0.85;
+    sctx.fillStyle=s.color || '#c9a44f';
+    sctx.beginPath();
+    for(let k=0;k<8;k++){
+      const rr=k%2 ? r*0.34 : r;
+      const an=k*Math.PI/4;
+      k ? sctx.lineTo(rr*Math.cos(an), rr*Math.sin(an))
+        : sctx.moveTo(rr*Math.cos(an), rr*Math.sin(an));
+    }
+    sctx.closePath(); sctx.fill();
+    sctx.restore();
+  }
+  sctx.globalAlpha=1;
+}
+
+function loadScript(src){
+  return new Promise((ok,bad)=>{
+    const s=document.createElement('script');
+    s.src=src; s.onload=ok; s.onerror=()=>bad(new Error('script load failed'));
+    document.head.appendChild(s);
+    setTimeout(()=>bad(new Error('script load timeout')), 15000);
+  });
+}
+
+async function enableGestures(){
+  handToggle.disabled=true;
+  camStatus.textContent='loading model…';
+  camWrap.classList.add('on');
+  try{
+    if(!window.Hands){
+      await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js');
+    }
+    handsInst=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    handsInst.setOptions({maxNumHands:1, modelComplexity:0,
+      minDetectionConfidence:0.6, minTrackingConfidence:0.5});
+    handsInst.onResults(onHandResults);
+
+    camStatus.textContent='requesting camera…';
+    camStream=await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'}});
+    camVideo.srcObject=camStream;
+    await camVideo.play();
+
+    gestureOn=true;
+    handToggle.classList.add('on');
+    handToggle.textContent='✋ Hand control · ON';
+    camStatus.textContent='✋ open palm = grab · flick to spin';
+    (async function pump(){
+      if(!gestureOn) return;
+      try{ await handsInst.send({image:camVideo}); }catch(e){ /* 单帧失败忽略 */ }
+      requestAnimationFrame(pump);
+    })();
+  }catch(err){
+    disableGestures();
+    handToggle.classList.add('err');
+    handToggle.textContent='✋ unavailable — mouse only';
+    camWrap.classList.remove('on');
+    setTimeout(()=>{ handToggle.classList.remove('err'); handToggle.textContent='✋ Hand control'; handToggle.disabled=false; }, 3200);
+    return;
+  }
+  handToggle.disabled=false;
+}
+
+function disableGestures(){
+  gestureOn=false; grabbing=false; lastHandX=null;
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  camVideo.srcObject=null;
+  camWrap.classList.remove('on');
+  handToggle.classList.remove('on');
+  handToggle.textContent='✋ Hand control';
+  snapWheel();
+}
+
+handToggle.addEventListener('click', ()=>{
+  if(handToggle.disabled) return;
+  ensureAudio();                       // 用户手势解锁音频，供转轮滴答
+  gestureOn ? disableGestures() : enableGestures();
+});
+
+/* ---------------- boot ---------------- */
+function boot(){
+  computeGeometry();
+  drawWheelLines();
+  initDust();
+  if(slots.length===0) initSlots();
+  for(const s of slots){ s.angle = s.base + offset; layout(s); }
+  updateCounter();
+}
+addEventListener('resize', boot);
+boot();
+requestAnimationFrame(t=>{ last=t; tick(t); });
+requestAnimationFrame(t=>{ dustLast=t; dustTick(t); });
+</script>
+</body>
+</html>

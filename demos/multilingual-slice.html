@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multilingual Reading — Slice Demo</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#fbfaf7}
+    body{
+      font-family:"DM Sans","Helvetica Neue",Arial,sans-serif;
+      cursor:none;
+      color:#171717;
+      background:
+        radial-gradient(54rem 18rem at 50% 100%, rgba(198,229,255,.48), transparent 68%),
+        radial-gradient(42rem 18rem at 56% 90%, rgba(255,210,226,.52), transparent 70%),
+        linear-gradient(180deg,#fff 0%,#f8f5ef 100%);
+    }
+    #stage{position:fixed;inset:0;overflow:hidden}
+    #trail{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+    .floor{
+      position:absolute;left:50%;bottom:-7rem;
+      width:min(108rem,88vw);height:20rem;
+      transform:translateX(-50%);
+      border-radius:50%;
+      background:radial-gradient(circle at 50% 48%, rgba(255,232,241,.72), rgba(229,244,255,.46) 44%, transparent 74%);
+      filter:blur(10px);
+      pointer-events:none;
+    }
+    .hint{
+      position:absolute;left:50%;bottom:9.2rem;
+      transform:translateX(-50%);
+      font-size:1rem;
+      letter-spacing:.04em;
+      color:rgba(23,23,23,.14);
+      pointer-events:none;
+      white-space:nowrap;
+    }
+    .score{
+      position:fixed;
+      right:11.2rem;
+      bottom:1.65rem;
+      z-index:12;
+      font-size:.95rem;
+      letter-spacing:.08em;
+      color:rgba(23,23,23,.24);
+      pointer-events:none;
+      white-space:nowrap;
+    }
+    .word,.shard{
+      position:absolute;left:0;top:0;
+      display:inline-grid;place-items:center;
+      min-width:8.8rem;min-height:4.8rem;
+      padding:.85rem 1.4rem;
+      border-radius:1.6rem;
+      font-family:"Georgia","Times New Roman",serif;
+      font-size:2.25rem;
+      line-height:1;
+      letter-spacing:-.03em;
+      will-change:transform,opacity;
+      user-select:none;
+      pointer-events:none;
+      transform-origin:center;
+    }
+    .glass{
+      color:rgba(50,96,120,.82);
+      background:linear-gradient(135deg, rgba(255,255,255,.82), rgba(180,232,255,.32));
+      border:1px solid rgba(128,187,214,.28);
+      box-shadow:inset 0 0 1.8rem rgba(255,255,255,.66), 0 1.1rem 2.2rem rgba(115,165,190,.18);
+      backdrop-filter:blur(8px);
+    }
+    .ink{
+      color:#fff;
+      background:linear-gradient(135deg,#202027,#56515c);
+      box-shadow:inset 0 .1rem .6rem rgba(255,255,255,.16), 0 1rem 2.2rem rgba(30,30,34,.18);
+    }
+    .jelly{
+      color:#a42b67;
+      background:linear-gradient(135deg, rgba(255,214,233,.94), rgba(255,128,181,.68));
+      box-shadow:inset -.5rem -.8rem 1.8rem rgba(194,42,111,.16), 0 1.2rem 2.4rem rgba(255,121,175,.2);
+    }
+    .paper{
+      color:#6d4a1e;
+      background:linear-gradient(135deg,#fff7dc,#e7c489);
+      box-shadow:inset 0 0 1.4rem rgba(128,84,32,.14), 0 1.1rem 2rem rgba(145,103,51,.15);
+    }
+    .chrome{
+      color:#263442;
+      background:linear-gradient(135deg,#ffffff 0%,#bec7cc 34%,#f8fbff 52%,#8e9aa4 100%);
+      box-shadow:inset 0 0 1.2rem rgba(255,255,255,.86), 0 1rem 2rem rgba(71,89,104,.18);
+    }
+    .sliced{
+      opacity:.86;
+      filter:saturate(1.08);
+    }
+    .meaning-pop{
+      min-width:auto;
+      min-height:auto;
+      padding:0;
+      border:0;
+      border-radius:0;
+      background:transparent;
+      box-shadow:none;
+      color:rgba(23,23,23,.58);
+      font-family:"DM Sans","Helvetica Neue",Arial,sans-serif;
+      font-size:1.35rem;
+      font-weight:400;
+      letter-spacing:.02em;
+      text-shadow:0 .7rem 1.4rem rgba(255,96,150,.18);
+    }
+    .half-left{clip-path:polygon(0 0,58% 0,48% 100%,0 100%)}
+    .half-right{clip-path:polygon(45% 0,100% 0,100% 100%,36% 100%)}
+    .shape-yuzu{border-radius:46% 54% 49% 51% / 42% 47% 53% 58%}
+    .shape-lychee{border-radius:58% 42% 48% 52% / 45% 52% 48% 55%}
+    .shape-pear{border-radius:48% 52% 58% 42% / 38% 40% 60% 62%}
+    .shape-grape{border-radius:48% 52% 50% 50% / 52% 44% 56% 48%}
+    .shape-apple{border-radius:44% 56% 50% 50% / 42% 42% 58% 58%}
+    .shape-fig{border-radius:54% 46% 52% 48% / 36% 40% 64% 60%}
+    .shape-mango{border-radius:62% 38% 56% 44% / 48% 38% 62% 52%}
+    .cursor-eye{
+      position:fixed;left:0;top:0;z-index:10;
+      transform:translate3d(-50%,-50%,0) rotate(-18deg);
+      font-size:2rem;
+      pointer-events:none;
+      filter:drop-shadow(0 .5rem .8rem rgba(0,0,0,.18));
+      mix-blend-mode:multiply;
+    }
+    body.embedded .hint{display:none}
+    html.embedded,
+    body.embedded{
+      background:transparent;
+    }
+    body.embedded .floor{
+      display:none;
+    }
+    /* 宿主详情页里：HUD 信息统一收到右上角 */
+    body.embedded .score{
+      top:1.3rem;right:1.5rem;bottom:auto;left:auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="trail"></canvas>
+    <div class="floor"></div>
+    <div class="hint">Try slicing these words</div>
+  </div>
+  <div class="score" id="score">🔪 Combo 0</div>
+  <div class="cursor-eye" id="cursorEye">👀🔪</div>
+  <script>
+    const isEmbedded = new URLSearchParams(location.search).get('embedded') === '1';
+    if(isEmbedded){
+      document.documentElement.classList.add('embedded');
+      document.body.classList.add('embedded');
+    }
+
+    const stage = document.getElementById('stage');
+    const canvas = document.getElementById('trail');
+    const ctx = canvas.getContext('2d');
+    const cursorEye = document.getElementById('cursorEye');
+    const scoreEl = document.getElementById('score');
+    const words = [
+      {text:'読む', gloss:'rhythm', shape:'shape-yuzu'},
+      {text:'言葉', gloss:'nuance', shape:'shape-yuzu'},
+      {text:'意味', gloss:'meaning', shape:'shape-yuzu'},
+      {text:'翻译', gloss:'translation', shape:'shape-lychee'},
+      {text:'语境', gloss:'context', shape:'shape-lychee'},
+      {text:'句子', gloss:'sentence', shape:'shape-lychee'},
+      {text:'문장', gloss:'context', shape:'shape-pear'},
+      {text:'책장', gloss:'page', shape:'shape-pear'},
+      {text:'기억', gloss:'memory', shape:'shape-pear'},
+      {text:'palabra', gloss:'voice', shape:'shape-mango'},
+      {text:'contexto', gloss:'reference', shape:'shape-mango'},
+      {text:'matiz', gloss:'nuance', shape:'shape-mango'},
+      {text:'lire', gloss:'flow', shape:'shape-grape'},
+      {text:'phrase', gloss:'syntax', shape:'shape-grape'},
+      {text:'annoter', gloss:'annotation', shape:'shape-grape'},
+      {text:'lesen', gloss:'tone', shape:'shape-apple'},
+      {text:'Sinn', gloss:'meaning', shape:'shape-apple'},
+      {text:'Stimme', gloss:'voice', shape:'shape-apple'}
+    ];
+    const materials = ['glass','jelly','paper','chrome','ink'];
+    const items = [];
+    const trail = [];
+    const scaleSoundPaths = [
+      '../assets/audio/scale/scale-01-do.wav',
+      '../assets/audio/scale/scale-02-re.wav',
+      '../assets/audio/scale/scale-03-mi.wav',
+      '../assets/audio/scale/scale-04-fa.wav',
+      '../assets/audio/scale/scale-05-sol.wav',
+      '../assets/audio/scale/scale-06-la.wav',
+      '../assets/audio/scale/scale-07-si.wav',
+      '../assets/audio/scale/scale-08-do-hi.wav',
+      '../assets/audio/scale/scale-09-re-hi.wav',
+      '../assets/audio/scale/scale-10-mi-hi.wav',
+      '../assets/audio/scale/scale-11-fa-hi.wav',
+      '../assets/audio/scale/scale-12-sol-hi.wav'
+    ];
+    const scaleSounds = scaleSoundPaths.map(src=>{
+      const audio = new Audio(src);
+      audio.preload = 'none';
+      audio.volume = .48;
+      return audio;
+    });
+    const daggerSliceSound = new Audio('../assets/audio/dagger-slice.wav');
+    daggerSliceSound.preload = 'none';
+    daggerSliceSound.volume = .62;
+    let lastSpawn = 0;
+    let comboCount = 0;
+    let pointer = {x: innerWidth * .5, y: innerHeight * .45, px: innerWidth * .5, py: innerHeight * .45, speed:0};
+    let audioCtx = null;
+    let demoActive = true;
+
+    function resize(){
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      canvas.width = innerWidth * dpr;
+      canvas.height = innerHeight * dpr;
+      canvas.style.width = innerWidth + 'px';
+      canvas.style.height = innerHeight + 'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    addEventListener('resize', resize);
+    resize();
+
+    function makeWord(){
+      const word = words[Math.floor(Math.random() * words.length)];
+      const el = document.createElement('div');
+      const material = materials[Math.floor(Math.random() * materials.length)];
+      el.className = `word ${material} ${word.shape}`;
+      el.textContent = word.text;
+      el.dataset.gloss = word.gloss;
+      stage.appendChild(el);
+      const size = 90 + Math.random() * 70;
+      let x;
+      if(isEmbedded){
+        /* 宿主 hero 中央是悬浮塔罗卡：词块只在左右两条带里升起 */
+        const cx = innerWidth / 2;
+        const guard = Math.max(250, innerWidth * .17);
+        const l0 = 70, l1 = Math.max(l0, cx - guard);
+        const r0 = Math.min(innerWidth - 70, cx + guard), r1 = innerWidth - 70;
+        const wl = l1 - l0, wr = r1 - r0;
+        const pick = Math.random() * (wl + wr);
+        x = pick < wl ? l0 + pick : r0 + (pick - wl);
+      } else {
+        x = 80 + Math.random() * Math.max(120, innerWidth - 160);
+      }
+      const y = innerHeight + 60;
+      const item = {
+        el, text:word.text, material, shape:word.shape, x, y,
+        /* embedded 横向漂移减半，别荡进中央卡片区 */
+        vx:(Math.random() - .5) * (isEmbedded ? 1.6 : 3.0),
+        vy:-(isEmbedded ? 18.0 + Math.random() * 2.6 : 14.2 + Math.random() * 6.4),
+        r:(Math.random() - .5) * 18, vr:(Math.random() - .5) * 1.65,
+        w:size, h:56, life:0, sliced:false, word:true
+      };
+      el.style.minWidth = size + 'px';
+      items.push(item);
+    }
+
+    function sliceItem(item){
+      if(item.sliced) return;
+      item.sliced = true;
+      comboCount += 1;
+      scoreEl.textContent = `🔪 Combo ${comboCount}`;
+      item.el.remove();
+      const midpoint = Math.max(1, Math.ceil(item.text.length / 2));
+      const left = item.text.slice(0, midpoint) || item.text;
+      const right = item.text.slice(midpoint) || item.text;
+      const parts = [left, right];
+      parts.forEach((part, i)=>{
+        const shard = document.createElement('div');
+        shard.className = `shard sliced ${item.material} ${item.shape} ${i ? 'half-right' : 'half-left'}`;
+        shard.textContent = part;
+        shard.style.minWidth = Math.max(58, item.w * .48) + 'px';
+        stage.appendChild(shard);
+        items.push({
+          el:shard, text:part,
+          x:item.x + (i ? item.w * .22 : -item.w * .22),
+          y:item.y,
+          vx:(i ? 1 : -1) * (4.5 + pointer.speed * .035),
+          vy:item.vy * .35 - 3.5,
+          r:item.r + (i ? 18 : -18),
+          vr:(i ? 1 : -1) * (3 + pointer.speed * .012),
+          w:item.w * .48, h:item.h, life:0, sliced:true, shard:true
+        });
+      });
+      const meaning = document.createElement('div');
+      meaning.className = 'shard meaning-pop';
+      meaning.textContent = item.el.dataset.gloss;
+      stage.appendChild(meaning);
+      items.push({
+        el:meaning, text:item.el.dataset.gloss,
+        x:item.x, y:item.y - 8,
+        vx:(Math.random() - .5) * 2.2,
+        vy:item.vy * .2 - 6.2,
+        r:(Math.random() - .5) * 6,
+        vr:(Math.random() - .5) * .8,
+        w:96, h:34, life:0, sliced:true, shard:true, meaning:true
+      });
+    }
+
+    function pointNearRect(px, py, item){
+      const cx = item.x;
+      const cy = item.y;
+      return px > cx - item.w * .58 && px < cx + item.w * .58 && py > cy - item.h * .8 && py < cy + item.h * .8;
+    }
+
+    function ensureAudio(){
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+
+    function playRecordedScaleSound(){
+      const base = scaleSounds[Math.floor(Math.random() * scaleSounds.length)];
+      if(!base) return false;
+      const sound = base.cloneNode(true);
+      sound.volume = .48;
+      const playPromise = sound.play();
+      if(playPromise && typeof playPromise.catch === 'function'){
+        playPromise.catch(()=>playSyntheticSliceSound());
+      }
+      return true;
+    }
+
+    function playSliceSound(){
+      const sound = daggerSliceSound.cloneNode(true);
+      sound.volume = .62;
+      const playPromise = sound.play();
+      if(playPromise && typeof playPromise.catch === 'function'){
+        playPromise.catch(()=>{
+          if(playRecordedScaleSound()) return;
+          playSyntheticSliceSound();
+        });
+        return;
+      }
+      if(playRecordedScaleSound()) return;
+      playSyntheticSliceSound();
+    }
+
+    function playSyntheticSliceSound(){
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * .09), ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for(let i=0;i<data.length;i++){
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.2);
+      }
+      const noise = ctx.createBufferSource();
+      const noiseGain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const ping = ctx.createOscillator();
+      const pingGain = ctx.createGain();
+
+      noise.buffer = noiseBuffer;
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(1350, now);
+      noiseGain.gain.setValueAtTime(.045, now);
+      noiseGain.gain.exponentialRampToValueAtTime(.0001, now + .09);
+
+      ping.type = 'triangle';
+      ping.frequency.setValueAtTime(980 + Math.min(pointer.speed, 40) * 10, now);
+      ping.frequency.exponentialRampToValueAtTime(620, now + .13);
+      pingGain.gain.setValueAtTime(.0001, now);
+      pingGain.gain.exponentialRampToValueAtTime(.035, now + .012);
+      pingGain.gain.exponentialRampToValueAtTime(.0001, now + .14);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      ping.connect(pingGain);
+      pingGain.connect(ctx.destination);
+      noise.start(now);
+      ping.start(now);
+      noise.stop(now + .1);
+      ping.stop(now + .15);
+    }
+
+    addEventListener('pointermove', e=>{
+      ensureAudio();
+      pointer.speed = Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y);
+      pointer.px = pointer.x;
+      pointer.py = pointer.y;
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+      cursorEye.style.transform = `translate3d(${pointer.x}px,${pointer.y}px,0) translate(-50%,-50%) rotate(${Math.max(-34, Math.min(18, (pointer.x-pointer.px)*.5 - 16))}deg)`;
+      trail.push({x:pointer.x,y:pointer.y,life:1});
+    }, {passive:true});
+
+    window.addEventListener('message', event=>{
+      if(event.data?.type === 'portfolio-demo-active' && event.data?.demo === 'reading'){
+        demoActive = true;
+      }
+      if(event.data?.type === 'portfolio-demo-inactive'){
+        demoActive = false;
+      }
+    });
+
+    function drawTrail(){
+      ctx.clearRect(0,0,innerWidth,innerHeight);
+      for(let i=trail.length-1;i>=0;i--){
+        const p = trail[i];
+        p.life -= .035;
+        if(p.life <= 0){ trail.splice(i,1); continue; }
+      }
+      if(trail.length < 2) return;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for(let i=1;i<trail.length;i++){
+        const a = trail[i-1], b = trail[i];
+        const alpha = Math.min(a.life,b.life) * .72;
+        ctx.strokeStyle = `rgba(255, 61, 111, ${alpha})`;
+        ctx.lineWidth = 2 + 10 * alpha;
+        ctx.beginPath();
+        ctx.moveTo(a.x,a.y);
+        ctx.lineTo(b.x,b.y);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255,255,255,${alpha * .78})`;
+        ctx.lineWidth = 1 + 3 * alpha;
+        ctx.stroke();
+      }
+    }
+
+    function tick(t){
+      if(document.hidden || !demoActive){
+        requestAnimationFrame(tick);
+        return;
+      }
+      let activeWords = 0;
+      for(const item of items){
+        if(!item.shard && !item.sliced) activeWords++;
+      }
+      if(t - lastSpawn > 1200 && activeWords < 5){
+        makeWord();
+        lastSpawn = t;
+      }
+      drawTrail();
+      for(let i=items.length-1;i>=0;i--){
+        const item = items[i];
+        item.life++;
+        const softCeilingY = isEmbedded ? innerHeight * .38 : -60;
+        const topLift = Math.max(0, softCeilingY - (item.y - item.h * .5));
+        if(topLift && item.vy < 0){
+          const brake = Math.min(.82, topLift / 150);
+          item.vy *= 1 - brake * .18;
+          item.vy += brake * .34;
+        }
+        item.vy += isEmbedded ? .258 : .325;
+        item.vx *= .996;
+        item.vr *= .99;
+        item.x += item.vx;
+        item.y += item.vy;
+        item.r += item.vr;
+        if(!item.sliced && pointer.speed > 7 && pointNearRect(pointer.x, pointer.y, item)){
+          sliceItem(item);
+          playSliceSound();
+          items.splice(i,1);
+          continue;
+        }
+        item.el.style.opacity = item.shard ? Math.max(0, 1 - item.life / (item.meaning ? 150 : 190)) : 1;
+        item.el.style.transform = `translate3d(${item.x - item.w/2}px,${item.y - item.h/2}px,0) rotate(${item.r}deg)`;
+        if(item.y > innerHeight + 160 || (item.shard && item.life > 180)){
+          if(item.word && !item.sliced){
+            comboCount = 0;
+            scoreEl.textContent = '🔪 Combo 0';
+          }
+          item.el.remove();
+          items.splice(i,1);
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+    for(let i=0;i<5;i++) setTimeout(makeWord, i * 260);
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

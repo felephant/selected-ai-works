@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>THINK — Use AI Wisely</title>
+  <link rel="preload" href="../assets/vendor/cannon.min.js" as="script">
+  <link rel="preload" href="../assets/vendor/three.min.js" as="script">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #c8cae6; overflow: hidden; width: 100vw; height: 100vh; }
+    canvas { display: block; }
+
+    #ui {
+      position: fixed;
+      bottom: 28px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      pointer-events: none;
+    }
+    .label {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(50,50,120,0.42);
+    }
+    #btnReset {
+      pointer-events: all;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(50,50,120,0.55);
+      background: none;
+      border: 1px solid rgba(50,50,120,0.2);
+      padding: 6px 16px;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #btnReset:hover { color: #2a2a80; border-color: rgba(50,50,120,0.5); }
+
+    #label-top {
+      position: fixed;
+      top: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(50,50,120,0.32);
+      pointer-events: none;
+    }
+    body.embedded #label-top,
+    body.embedded #ui {
+      display: none;
+    }
+    html.embedded,
+    body.embedded {
+      background: transparent;
+    }
+    #errorState {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 2rem;
+      font-family: 'DM Sans', sans-serif;
+      color: rgba(50,50,120,0.58);
+      text-align: center;
+      background: transparent;
+      pointer-events: none;
+    }
+    #errorState.show { display: grid; }
+  </style>
+</head>
+<body>
+  <script>
+    const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
+    window.__portfolioIsEmbedded = isEmbedded;
+    if (isEmbedded) {
+      document.documentElement.classList.add('embedded');
+      document.body.classList.add('embedded');
+    }
+  </script>
+  <canvas id="c"></canvas>
+  <div id="errorState"></div>
+  <div id="label-top">Use AI Wisely — Chain Reaction</div>
+  <div id="ui">
+    <span class="label">Move mouse to guide the ball · knock THINK down</span>
+    <button id="btnReset">↺ Reset</button>
+  </div>
+
+  <script src="../assets/vendor/cannon.min.js"></script>
+  <script src="../assets/vendor/three.min.js"></script>
+
+  <script>
+  const THREE = window.THREE;
+  class RoundedBoxGeometry extends THREE.BoxGeometry {
+    constructor(width = 1, height = 1, depth = 1, segments = 2) {
+      super(width, height, depth, segments * 2 + 1, segments * 2 + 1, segments * 2 + 1);
+    }
+  }
+  const CANNON = window.CANNON;
+  const isEmbeddedDemo = window.__portfolioIsEmbedded === true;
+
+  {
+    const errorState = document.getElementById('errorState');
+    if(!THREE){
+      errorState.textContent = 'Three.js failed to load from local assets.';
+      errorState.classList.add('show');
+      throw new Error('THREE dependency unavailable');
+    }
+    if(!CANNON){
+      errorState.textContent = 'Domino physics failed to load. Check network access for cannon.js.';
+      errorState.classList.add('show');
+      throw new Error('CANNON dependency unavailable');
+    }
+    // ─── RENDERER ────────────────────────────────────────────────
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    scene.background = null;
+
+    // Camera — front-facing with slight elevation (matches GPT reference)
+    // Mostly +Z so domino thin faces point at camera, slight +X for depth
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+    camera.position.set(0, 18, 22);
+    camera.lookAt(0, 0, 0);
+
+    function resize() {
+      const W = window.innerWidth, H = window.innerHeight;
+      renderer.setSize(W, H);
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ─── LIGHTING — studio with contrast ─────────────────────────
+    // Lower ambient = shadows are visible → face-to-face tonal difference shows
+    scene.add(new THREE.AmbientLight(0xeeeeff, 0.85));
+
+    // Key: nearly overhead, slight forward lean
+    // Strong enough that top faces go bright white-blue vs darker side faces
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(0, 40, 6);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left   = -22;
+    key.shadow.camera.right  =  22;
+    key.shadow.camera.top    =  18;
+    key.shadow.camera.bottom = -12;
+    key.shadow.camera.far    =  55;
+    key.shadow.bias = -0.0005;
+    scene.add(key);
+
+    // Soft camera-side fill — keeps front faces readable, not too flat
+    const fill = new THREE.DirectionalLight(0xcce0ff, 0.45);
+    fill.position.set(0, 10, 20);
+    scene.add(fill);
+
+    // Blue scene glow near floor — fakes the colored bleed/reflection
+    // that Spline achieves via SSR (screen-space reflections)
+    const sceneGlow = new THREE.PointLight(0x5577ff, 0.55, 26);
+    sceneGlow.position.set(0, 1.2, 0);
+    scene.add(sceneGlow);
+
+    // Red accent glow — follows ball
+    const ballLight = new THREE.PointLight(0xff385c, 1.4, 12);
+    scene.add(ballLight);
+
+    // ─── FLOOR ────────────────────────────────────────────────────
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(100, 100),
+      new THREE.MeshStandardMaterial({
+        color: 0xfafafa,
+        roughness: 0.10,
+        metalness: 0,
+        transparent: document.body.classList.contains('embedded'),
+        opacity: document.body.classList.contains('embedded') ? 0 : 1
+      })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // No grid — clean studio floor
+
+    // ─── PHYSICS ─────────────────────────────────────────────────
+    const world = new CANNON.World();
+    world.gravity.set(0, -18, 0);
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 40;
+
+    const matDomino = new CANNON.Material('domino');
+    const matBall   = new CANNON.Material('ball');
+    const matFloor  = new CANNON.Material('floor');
+
+    world.addContactMaterial(new CANNON.ContactMaterial(matDomino, matDomino, {
+      friction: 0.10, restitution: 0.04,  // very low friction = topples easily
+    }));
+    world.addContactMaterial(new CANNON.ContactMaterial(matDomino, matFloor, {
+      friction: 0.15, restitution: 0.02,
+    }));
+    world.addContactMaterial(new CANNON.ContactMaterial(matBall, matDomino, {
+      friction: 0.08, restitution: 0.08,  // ball slides through cleanly
+    }));
+
+    const groundBody = new CANNON.Body({ mass: 0, material: matFloor });
+    groundBody.addShape(new CANNON.Plane());
+    groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+    world.addBody(groundBody);
+
+    // ─── LETTER PIXEL MAPS ───────────────────────────────────────
+    const GLYPHS = {
+      T: [
+        [1,1,1,1,1],
+        [0,0,1,0,0],
+        [0,0,1,0,0],
+        [0,0,1,0,0],
+        [0,0,1,0,0],
+        [0,0,1,0,0],
+        [0,0,1,0,0],
+      ],
+      H: [
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+        [1,1,1,1,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+      ],
+      I: [
+        [1,1,1],
+        [0,1,0],
+        [0,1,0],
+        [0,1,0],
+        [0,1,0],
+        [0,1,0],
+        [1,1,1],
+      ],
+      N: [
+        [1,0,0,0,1],
+        [1,1,0,0,1],
+        [1,0,1,0,1],
+        [1,0,0,1,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+      ],
+      K: [
+        [1,0,0,0,1],
+        [1,0,0,1,0],
+        [1,0,1,0,0],
+        [1,1,0,0,0],
+        [1,0,1,0,0],
+        [1,0,0,1,0],
+        [1,0,0,0,1],
+      ],
+    };
+
+    // ─── DOMINO DIMENSIONS ───────────────────────────────────────
+    const DW   = 0.62;  // width  X — wider
+    const DH   = 1.25;  // height Y — shorter
+    const DD   = 0.22;  // depth  Z
+    const CELL = 0.86;  // spacing
+    const LGAP = 2.2;   // big letter gap for legibility
+
+    // RoundedBoxGeometry: (width, height, depth, segments, radius)
+    // cornerRadius = 4/38.26 of width ≈ 10.5% → 0.065 on DW=0.62
+    const dominoGeo = new RoundedBoxGeometry(DW, DH, DD, 4, 0.065);
+
+    function makeMat(fallen) {
+      return new THREE.MeshStandardMaterial(fallen ? {
+        // fallen → accent red
+        color:             0xff385c,
+        roughness:         0.75,
+        metalness:         0.0,
+        emissive:          new THREE.Color(0xff385c),
+        emissiveIntensity: 0.12,
+      } : {
+        // standing — semi-glossy so overhead key creates real highlight on top face
+        // top: near white-blue  |  front: mid blue  |  sides: darker blue
+        color:             0x4d7aff,   // slightly brighter than raw reference
+        roughness:         0.32,       // glossy enough for tonal face contrast
+        metalness:         0.0,
+        emissive:          new THREE.Color(0x1133dd),
+        emissiveIntensity: 0.06,       // tiny self-glow = "translucent acrylic" look
+      });
+    }
+
+    // ─── INFECTION SYSTEM ────────────────────────────────────────
+    // infected = Set of domino indices that have been turned red
+    // bodyIdx  = WeakMap from CANNON.Body → index in bodies[]
+    const infected = new Set();
+    const bodyIdx  = new WeakMap();
+    let audioCtx = null;
+    let lastDominoClickAt = 0;
+    let demoActive = true;
+
+    function ensureAudio(){
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+
+    function playDominoClick(){
+      const nowMs = performance.now();
+      if(nowMs - lastDominoClickAt < 38) return;
+      lastDominoClickAt = nowMs;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(920 + Math.random() * 360, now);
+      osc.frequency.exponentialRampToValueAtTime(560 + Math.random() * 120, now + .08);
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1200, now);
+      filter.Q.setValueAtTime(8, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.045, now + .006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + .11);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + .12);
+    }
+
+    function infectBody(i) {
+      if (i < 0 || infected.has(i)) return;
+      infected.add(i);
+      meshes[i].material = makeMat(true);
+      playDominoClick();
+    }
+
+    let meshes = [], bodies = [];
+
+    function buildScene() {
+      infected.clear();
+      meshes.forEach(m => scene.remove(m));
+      bodies.forEach(b => world.remove(b));
+      meshes = []; bodies = [];
+
+      const letters = ['T','H','I','N','K'];
+      let totalW = 0;
+      letters.forEach((l, i) => {
+        totalW += GLYPHS[l][0].length * CELL;
+        if (i < letters.length - 1) totalW += LGAP;
+      });
+      let xCursor = -totalW / 2 + CELL * 0.5;
+
+      letters.forEach(letter => {
+        const grid = GLYPHS[letter];
+        const rows = grid.length;
+        const cols = grid[0].length;
+
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            if (!grid[row][col]) continue;
+
+            const x = xCursor + col * CELL;
+            const z = (row - (rows - 1) * 0.5) * CELL + 1.45; // slight forward shift lowers the word in camera view
+            const y = DH / 2;
+
+            const mesh = new THREE.Mesh(dominoGeo, makeMat(false));
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            meshes.push(mesh);
+
+            const body = new CANNON.Body({ mass: 0.15, material: matDomino });
+            body.addShape(new CANNON.Box(new CANNON.Vec3(DW/2, DH/2, DD/2)));
+            body.position.set(x, y, z);
+            body.linearDamping  = 0.05;
+            body.angularDamping = 0.05;
+            body.allowSleep = false;
+            world.addBody(body);
+            bodyIdx.set(body, bodies.length); // register before push
+            bodies.push(body);
+          }
+        }
+        xCursor += cols * CELL + LGAP;
+      });
+    }
+
+    // ─── BALL ────────────────────────────────────────────────────
+    const BALL_R = 0.52;
+    const ballMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(BALL_R, 24, 24),
+      new THREE.MeshStandardMaterial({
+        color:             0xff385c,
+        roughness:         0.06,
+        metalness:         0.88,
+        emissive:          new THREE.Color(0xff385c),
+        emissiveIntensity: 0.4,
+      })
+    );
+    ballMesh.castShadow = true;
+    scene.add(ballMesh);
+
+    const ballBody = new CANNON.Body({ mass: 1.5, material: matBall });
+    ballBody.addShape(new CANNON.Sphere(BALL_R));
+    ballBody.linearDamping  = 0.15;
+    ballBody.angularDamping = 0.3;
+    ballBody.allowSleep = false;
+    world.addBody(ballBody);
+
+    // ─── MOUSE → BALL (velocity-based, snappy) ───────────────────
+    const mouse3D    = new THREE.Vector3(0, 0, 12);
+    const raycaster  = new THREE.Raycaster();
+    const mv2        = new THREE.Vector2();
+    const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+    function setMouseFromClient(clientX, clientY) {
+      mv2.set(
+        (clientX / window.innerWidth)  *  2 - 1,
+        (clientY / window.innerHeight) * -2 + 1
+      );
+      raycaster.setFromCamera(mv2, camera);
+      raycaster.ray.intersectPlane(floorPlane, mouse3D);
+      mouse3D.x = Math.max(-16, Math.min(16, mouse3D.x));
+      mouse3D.z = Math.max(-5,  Math.min(14, mouse3D.z));
+    }
+
+    function placeBallAtMouse() {
+      ballBody.position.set(mouse3D.x, BALL_R, mouse3D.z);
+      ballBody.velocity.set(0, 0, 0);
+      ballBody.angularVelocity.set(0, 0, 0);
+    }
+
+    window.addEventListener('mousemove', e => {
+      ensureAudio();
+      setMouseFromClient(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('message', e => {
+      if(!e.data) return;
+      if(e.data.type === 'portfolio-demo-active' && e.data.demo === 'think'){
+        demoActive = true;
+        return;
+      }
+      if(e.data.type === 'portfolio-demo-inactive'){
+        demoActive = false;
+        return;
+      }
+      if(e.data.type === 'portfolio-pointer'){
+        setMouseFromClient(e.data.x, e.data.y);
+        placeBallAtMouse();
+      }
+    });
+
+    function resetBall() {
+      placeBallAtMouse();
+    }
+
+    document.getElementById('btnReset').addEventListener('click', () => {
+      buildScene();
+      resetBall();
+    });
+
+    // ─── ANIMATE ─────────────────────────────────────────────────
+    const clock   = new THREE.Clock();
+    const MAX_SPD = 7.5; // snappy — higher cap for more responsive feel
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if(document.hidden) return;
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      if(!demoActive){
+        renderer.render(scene, camera);
+        return;
+      }
+
+      // Velocity-based control — snappy but capped so ball doesn't tunnel into dominoes
+      const bp = ballBody.position;
+      const dx = mouse3D.x - bp.x;
+      const dz = mouse3D.z - bp.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+
+      if (dist > 0.1) {
+        const spd = Math.min(dist * 6, MAX_SPD);
+        ballBody.velocity.x = (dx / dist) * spd;
+        ballBody.velocity.z = (dz / dist) * spd;
+      } else {
+        ballBody.velocity.x *= 0.7;
+        ballBody.velocity.z *= 0.7;
+      }
+
+      // Lock to floor
+      if (bp.y < BALL_R) {
+        bp.y = BALL_R;
+        if (ballBody.velocity.y < 0) ballBody.velocity.y = 0;
+      }
+
+      world.step(1 / 60, dt, 5);
+
+      // Sync ball
+      ballMesh.position.copy(bp);
+      ballMesh.quaternion.copy(ballBody.quaternion);
+      ballLight.position.copy(bp);
+
+      // Sync domino meshes to physics bodies
+      for (let i = 0; i < meshes.length; i++) {
+        meshes[i].position.copy(bodies[i].position);
+        meshes[i].quaternion.copy(bodies[i].quaternion);
+      }
+
+      // ── Contact-based infection ──────────────────────────────────
+      // Scan every active contact pair this frame:
+      //   • ball touching a domino → infect that domino immediately
+      //   • red domino touching a blue domino → infect the blue one
+      const contacts = world.contacts;
+      for (let c = 0; c < contacts.length; c++) {
+        const bi = contacts[c].bi;
+        const bj = contacts[c].bj;
+        const isBallI = (bi === ballBody);
+        const isBallJ = (bj === ballBody);
+        const idxI = bodyIdx.get(bi) ?? -1;
+        const idxJ = bodyIdx.get(bj) ?? -1;
+
+        if (isBallI && idxJ >= 0) infectBody(idxJ);        // ball → domino j
+        if (isBallJ && idxI >= 0) infectBody(idxI);        // ball → domino i
+
+        if (idxI >= 0 && idxJ >= 0) {                      // domino–domino
+          if (infected.has(idxI)) infectBody(idxJ);
+          if (infected.has(idxJ)) infectBody(idxI);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    buildScene();
+    resetBall();
+    animate();
+
+  }
+  </script>
+</body>
+</html>
