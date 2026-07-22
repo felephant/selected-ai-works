@@ -843,9 +843,11 @@ function layout(slot){
     `translate(${x - cardW/2}px, ${y - cardH/2}px) rotate(${slot.angle}deg) scale(${scale})`;
   /* 立体：卡片像贴在一只转鼓上——越偏离中心，越把正面转开。
      正中(0°)完全正对观众，两侧渐渐侧过去，配一点点后仰。
+     wheelLean 是全局惯性倾角：转动时所有卡顺转动方向多转一点，停下摆回，
+     中心卡因此有"顺势翻一下再落定"的动态。
      写成 CSS 变量交给 .card-inner，不跟上面的定位 transform 打架。 */
-  slot.el.style.setProperty('--yaw',   (slot.angle * 0.62).toFixed(2)+'deg');
-  slot.el.style.setProperty('--pitch', (Math.min(a, 40) * 0.06).toFixed(2)+'deg');
+  slot.el.style.setProperty('--yaw',   (slot.angle * 0.88 + wheelLean).toFixed(2)+'deg');
+  slot.el.style.setProperty('--pitch', (Math.min(a, 40) * 0.09).toFixed(2)+'deg');
   if(slot.coverEdgeEl){
     // 居中（a=0）显色版；转过约半格卡位（a≈9°）就已完全切到浅色版
     slot.coverEdgeEl.style.opacity = String(Math.max(0, Math.min(1, a/9)));
@@ -949,10 +951,14 @@ function notchCheck(){
 let coasting=false, spinVel=0;         // deg/s
 const FRICTION=0.95, SNAP_VEL=22;      // 摩擦更小 → 滑得更远更久
 
+/* 转鼓惯性倾角（deg）：由轮角速度驱动，卡片顺转动方向多转一点、停下摆回 */
+let wheelLean=0, _prevOffset=0;
+
 let last = performance.now();
 function tick(now){
   const dt = Math.min(0.05, (now - last)/1000);
   last = now;
+  let needApply=false;
   if(coasting){
     offset += spinVel*dt;
     spinVel *= Math.exp(-FRICTION*dt);
@@ -962,17 +968,29 @@ function tick(now){
     } else {
       targetOffset = offset;
     }
-    applyWheel();
+    needApply=true;
   } else {
-    const diff = targetOffset - offset;
+    /* 抓轮时把目标点沿手速外推一小段（≤80ms）：识别 ~30fps、渲染 60fps，
+       不外推的话 offset 每 33ms 追一个静止台阶——那就是"跟手但一顿一顿"。
+       外推让两次识别之间目标持续前移，插值始终有活干。 */
+    const pred = grabbing ? velEMA * Math.min((now - lastMoveT)/1000, 0.08) : 0;
+    const diff = (targetOffset + pred) - offset;
     if(Math.abs(diff) > 0.005){
-      // 抓轮时用更高刚度（≈45ms 追平）：既跟手又保持 60fps 平滑插值
-      const k = grabbing ? 22 : EASE;
+      const k = grabbing ? 16 : EASE;
       offset += reduceMotion ? diff : diff * (1 - Math.exp(-k*dt));
-      if(Math.abs(targetOffset - offset) <= 0.005) offset = targetOffset;
-      applyWheel();
+      if(!grabbing && Math.abs(targetOffset - offset) <= 0.005) offset = targetOffset;
+      needApply=true;
     }
   }
+  /* 惯性倾角：角速度→tanh 软限幅→EMA 平滑。停稳后继续驱动布局把倾角摆回零。 */
+  const instV=(offset - _prevOffset)/Math.max(dt, 1e-3); _prevOffset=offset;
+  const leanTarget = reduceMotion ? 0 : Math.tanh(instV/340)*24;
+  if(Math.abs(leanTarget - wheelLean) > 0.02 || Math.abs(wheelLean) > 0.02){
+    wheelLean += (leanTarget - wheelLean) * Math.min(1, dt*9);
+    if(Math.abs(wheelLean) < 0.02 && Math.abs(leanTarget) < 0.02) wheelLean = 0;
+    needApply=true;
+  }
+  if(needApply) applyWheel();
   requestAnimationFrame(tick);
 }
 
@@ -1181,7 +1199,7 @@ const camWrap=document.getElementById('camWrap');
 const camVideo=document.getElementById('camVideo');
 const camStatus=document.getElementById('camStatus');
 
-let gestureOn=false, handsInst=null, camStream=null;
+let gestureOn=false, handsInst=null, handLandmarker=null, camStream=null;
 let lastHandX=null, lastSeen=0, grabbing=false;
 let velEMA=0, lastMoveT=0;
 const FOLLOW_K=135;           // 跟手灵敏度（越大越灵）
@@ -1216,7 +1234,9 @@ function onHandResults(res){
   const lms=res.multiHandLandmarks;
   eyeFrame(lms);                       // 掌心之眼 + 牵线燕子
   if(!lms || !lms.length){
-    if(grabbing && now-lastSeen>300) releaseGrab();
+    /* 快速挥动时 320p 画面动态模糊，检测常掉一两帧——宽限放宽到 450ms，
+       否则会频繁松手→吸附→再抓，表现为"一顿一顿" */
+    if(grabbing && now-lastSeen>450) releaseGrab();
     return;
   }
   lastSeen=now;
@@ -1231,12 +1251,14 @@ function onHandResults(res){
       camStatus.textContent='✋ holding — move or flick';
     } else {
       const dts=Math.max(8, now-lastMoveT)/1000;
-      const dOff=(x-lastHandX)*FOLLOW_K;
-      // 只推目标值，渲染由 60fps 主循环用高刚度缓动追——
-      // 避免转轮更新被锁在手部识别的低帧率上（卡顿根源）
+      /* 手部坐标一阶平滑（0.55）：320p 识别的 x 抖动 ±1~2px，乘上 FOLLOW_K
+         就是每帧近 1° 的高频颤——先滤掉再驱动转轮。位移是累计的，不损失总量。 */
+      const xs = lastHandX + (x - lastHandX)*0.55;
+      const dOff = (xs - lastHandX)*FOLLOW_K;
+      // 只推目标值，渲染由 60fps 主循环缓动追 + 手速外推（见 tick）
       targetOffset += dOff;
-      velEMA = 0.65*velEMA + 0.35*(dOff/dts);        // 平滑角速度，供甩出惯性
-      lastHandX=x; lastMoveT=now;
+      velEMA = 0.65*velEMA + 0.35*(dOff/dts);        // 平滑角速度，供甩出惯性与外推
+      lastHandX=xs; lastMoveT=now;
     }
   } else if(grabbing){
     releaseGrab();
@@ -1464,13 +1486,34 @@ async function enableGestures(){
   camStatus.textContent='loading model…';
   camWrap.classList.add('on');
   try{
-    if(!window.Hands){
-      await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js');
+    /* 优先用 tasks-vision 的 GPU 版 HandLandmarker：旧版 hands.js 在主线程跑
+       CPU-WASM，单帧推理二三十毫秒，就算限速也会周期性顶掉渲染帧——这是
+       "怎么调都还有点卡"的底层原因。GPU 版单帧几毫秒且大头在显卡上异步跑。
+       任何一步失败（CDN/模型/WebGL）都回落旧版，行为不变。 */
+    try{
+      const mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+      const files = await mod.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+      handLandmarker = await mod.HandLandmarker.createFromOptions(files, {
+        baseOptions:{
+          modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate:'GPU',
+        },
+        runningMode:'VIDEO', numHands:1,
+        minHandDetectionConfidence:0.6, minTrackingConfidence:0.5,
+      });
+      console.info('[hand] tasks-vision GPU engine');
+    }catch(e){
+      handLandmarker=null;
+      console.info('[hand] falling back to legacy hands.js:', e && e.message);
+      if(!window.Hands){
+        await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js');
+      }
+      handsInst=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+      handsInst.setOptions({maxNumHands:1, modelComplexity:0,
+        minDetectionConfidence:0.6, minTrackingConfidence:0.5});
+      handsInst.onResults(onHandResults);
     }
-    handsInst=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    handsInst.setOptions({maxNumHands:1, modelComplexity:0,
-      minDetectionConfidence:0.6, minTrackingConfidence:0.5});
-    handsInst.onResults(onHandResults);
 
     camStatus.textContent='requesting camera…';
     camStream=await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'}});
@@ -1481,19 +1524,27 @@ async function enableGestures(){
     handToggle.classList.add('on');
     handToggle.textContent='✋ Hand control · ON';
     camStatus.textContent='✋ open palm = grab · flick to spin';
-    /* 推理限速：单次 send() 要占主线程二三十毫秒，若每帧都跑会把 60fps 的
-       转轮渲染挤掉，手感就是"跟手但一顿一顿"。这里压到 ~30fps 并防重入，
-       腾出的主线程时间留给 tick() 插值——识别慢一点，画面反而更跟手。 */
+    /* 推理限速 ~30fps + 防重入：识别慢一点，主线程时间留给 tick() 插值，
+       画面反而更跟手。GPU 路径 detectForVideo 是同步调用、开销几毫秒；
+       旧版 send() 是异步且吃主线程，各走各的分支。 */
     const HAND_MS = 1000/30;
     let lastSend = 0, inferring = false;
     (function pump(now){
       if(!gestureOn) return;
       requestAnimationFrame(pump);                 // 先排下一帧，推理不阻塞排队
       if(inferring || now - lastSend < HAND_MS) return;
-      lastSend = now; inferring = true;
-      Promise.resolve(handsInst.send({image:camVideo}))
-        .catch(()=>{})                             // 单帧失败忽略
-        .finally(()=>{ inferring = false; });
+      lastSend = now;
+      if(handLandmarker){
+        try{
+          const res = handLandmarker.detectForVideo(camVideo, now);
+          onHandResults({multiHandLandmarks: res.landmarks});
+        }catch(e){ /* 单帧失败忽略（video 未就绪等） */ }
+      } else {
+        inferring = true;
+        Promise.resolve(handsInst.send({image:camVideo}))
+          .catch(()=>{})                           // 单帧失败忽略
+          .finally(()=>{ inferring = false; });
+      }
     })(performance.now());
   }catch(err){
     disableGestures();
@@ -1508,6 +1559,7 @@ async function enableGestures(){
 
 function disableGestures(){
   gestureOn=false; grabbing=false; lastHandX=null;
+  if(handLandmarker){ try{ handLandmarker.close(); }catch(e){} handLandmarker=null; }
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
   camVideo.srcObject=null;
   camWrap.classList.remove('on');
