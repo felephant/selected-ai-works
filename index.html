@@ -48,6 +48,13 @@
     font-size:10px;letter-spacing:.26em;text-transform:uppercase;
     color:var(--ink-soft);line-height:2.1;opacity:.85;
   }
+  .aside-note strong{
+    display:block;font-weight:700;color:var(--ink);
+  }
+  .aside-sub{
+    display:block;margin-top:10px;
+    letter-spacing:.2em;text-transform:none;opacity:.85;
+  }
 
   /* ---- 手势控制开关 + 摄像头预览 ---- */
   .hand-toggle{
@@ -449,9 +456,8 @@
 </div>
 
 <div class="aside-note">
-  Product and graphic designer<br>
-  working with AI as daily craft<br>
-  seven systems, drawn one at a time
+  <strong>Product Designer, Graphic Designer</strong>
+  <span class="aside-sub">Case Study work in progress<br>but just have fun</span>
 </div>
 
 <div class="masthead">
@@ -881,15 +887,22 @@ function ensureAudio(){
 }
 /* 音符按转轮方向在音阶上走：向一边转依次升，向另一边依次降，走到头折返。
    比纯随机顺耳得多——相邻两下永远是相邻音级，不会出现突兀的大跳。 */
-let noteIdx = 0;
+/* 《钟》(La Campanella) 式动机：一个固定高音当铃，中间穿插大跳的拱形旋律。
+   原曲是升 g 小调、半音密集、招牌音高远高于这套素材的音域，无法照搬；
+   这里复刻的是它最标志性的手势——高音铃反复敲击 + 每次大跳。
+   索引：0=do 1=re 2=mi 3=fa 4=sol 5=la 6=si 7=do' 8=re' 9=mi' 10=fa' 11=sol'
+   11 是铃，偶数位固定；奇数位是低音区的旋律，走 mi-sol-la-si-sol-mi 的拱形。 */
+const BELL_MOTIF = [11, 2, 11, 4, 11, 5, 11, 6, 11, 4, 11, 2];
+let motifPos = 0, noteIdx = 0;
 function playTick(speed, dir){
   if(!actx || actx.state!=='running' || !scaleBuffers) return;
-  const N = scaleBuffers.length;
-  if(dir){                       // 有方向就走音阶，到头回绕成连续的上行/下行琶音
-    noteIdx = ((noteIdx + (dir > 0 ? 1 : -1)) % N + N) % N;
+  const M = BELL_MOTIF.length;
+  if(dir){                       // 顺着转轮方向在动机里前进/后退，首尾相接
+    motifPos = ((motifPos + (dir > 0 ? 1 : -1)) % M + M) % M;
   } else {
-    noteIdx = Math.floor(Math.random()*N);
+    motifPos = (motifPos + 1) % M;
   }
+  noteIdx = Math.min(BELL_MOTIF[motifPos], scaleBuffers.length - 1);
   const t=actx.currentTime;
   const src=actx.createBufferSource(), g=actx.createGain();
   src.buffer = scaleBuffers[noteIdx];
