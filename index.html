@@ -137,6 +137,21 @@
     display:flex;flex-direction:column;
     transition:box-shadow .35s ease;
     position:relative;
+    /* 转鼓式立体：yaw/pitch 由 layout() 每帧写入，随卡位自然变化。
+       不加 transition——它本来就跟着转轮的缓动逐帧走，加了反而拖影。 */
+    transform:perspective(1100px)
+              rotateY(var(--yaw, 0deg))
+              rotateX(var(--pitch, 0deg));
+    transform-origin:50% 50%;
+    backface-visibility:hidden;
+  }
+  /* 悬停：转正一点、朝观众抬起来，像被拈起 */
+  .card:hover .card-inner{
+    transform:perspective(1100px)
+              rotateY(calc(var(--yaw, 0deg) * .45))
+              rotateX(calc(var(--pitch, 0deg) * .3))
+              translateZ(26px);
+    transition:transform .4s cubic-bezier(.22,.8,.3,1), box-shadow .35s ease;
   }
   .has-cover .card-inner{
     background:transparent;
@@ -826,6 +841,11 @@ function layout(slot){
   slot.el.style.zIndex = String(100 - Math.round(a));
   slot.el.style.transform =
     `translate(${x - cardW/2}px, ${y - cardH/2}px) rotate(${slot.angle}deg) scale(${scale})`;
+  /* 立体：卡片像贴在一只转鼓上——越偏离中心，越把正面转开。
+     正中(0°)完全正对观众，两侧渐渐侧过去，配一点点后仰。
+     写成 CSS 变量交给 .card-inner，不跟上面的定位 transform 打架。 */
+  slot.el.style.setProperty('--yaw',   (slot.angle * 0.62).toFixed(2)+'deg');
+  slot.el.style.setProperty('--pitch', (Math.min(a, 40) * 0.06).toFixed(2)+'deg');
   if(slot.coverEdgeEl){
     // 居中（a=0）显色版；转过约半格卡位（a≈9°）就已完全切到浅色版
     slot.coverEdgeEl.style.opacity = String(Math.max(0, Math.min(1, a/9)));
@@ -1461,11 +1481,20 @@ async function enableGestures(){
     handToggle.classList.add('on');
     handToggle.textContent='✋ Hand control · ON';
     camStatus.textContent='✋ open palm = grab · flick to spin';
-    (async function pump(){
+    /* 推理限速：单次 send() 要占主线程二三十毫秒，若每帧都跑会把 60fps 的
+       转轮渲染挤掉，手感就是"跟手但一顿一顿"。这里压到 ~30fps 并防重入，
+       腾出的主线程时间留给 tick() 插值——识别慢一点，画面反而更跟手。 */
+    const HAND_MS = 1000/30;
+    let lastSend = 0, inferring = false;
+    (function pump(now){
       if(!gestureOn) return;
-      try{ await handsInst.send({image:camVideo}); }catch(e){ /* 单帧失败忽略 */ }
-      requestAnimationFrame(pump);
-    })();
+      requestAnimationFrame(pump);                 // 先排下一帧，推理不阻塞排队
+      if(inferring || now - lastSend < HAND_MS) return;
+      lastSend = now; inferring = true;
+      Promise.resolve(handsInst.send({image:camVideo}))
+        .catch(()=>{})                             // 单帧失败忽略
+        .finally(()=>{ inferring = false; });
+    })(performance.now());
   }catch(err){
     disableGestures();
     handToggle.classList.add('err');
